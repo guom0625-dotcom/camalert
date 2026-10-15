@@ -66,6 +66,7 @@ class AlertService : Service(), LocationListener {
     }
 
     override fun onDestroy() {
+        statusLine = null
         if (running) stopTracking()
         voice.shutdown()
         super.onDestroy()
@@ -104,6 +105,7 @@ class AlertService : Service(), LocationListener {
     private fun shutdown() {
         if (running) stopTracking()
         running = false
+        statusLine = null
         voice.stop()
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
@@ -116,6 +118,8 @@ class AlertService : Service(), LocationListener {
     }
 
     private fun buildNotification(): Notification {
+        val title = if (paused) "카메라 알림 멈춤" else "카메라 알림 실행 중"
+        statusLine = "$title\n${source.status}"
         val toggle = if (paused) {
             action(android.R.drawable.ic_media_play, "▶ 시작", servicePending(this, ACTION_RESUME))
         } else {
@@ -123,7 +127,7 @@ class AlertService : Service(), LocationListener {
         }
         return Notification.Builder(this, CHANNEL_RUNNING)
             .setSmallIcon(R.drawable.ic_stat_camera)
-            .setContentTitle(if (paused) "카메라 알림 멈춤" else "카메라 알림 실행 중")
+            .setContentTitle(title)
             .setContentText(source.status)
             .setContentIntent(settingsPending(this))
             .setOngoing(true)
@@ -144,6 +148,11 @@ class AlertService : Service(), LocationListener {
         private const val CONNECTED_NOTIFICATION_ID = 2
         private const val CHANNEL_RUNNING = "running"
         private const val CHANNEL_CONNECTED = "connected"
+
+        /** 설정 화면에 보여줄 현재 상태. 서비스가 꺼져 있으면 null */
+        @Volatile
+        var statusLine: String? = null
+            private set
 
         const val ACTION_START = "com.gom.camalert.START"
         const val ACTION_RESUME = "com.gom.camalert.RESUME"

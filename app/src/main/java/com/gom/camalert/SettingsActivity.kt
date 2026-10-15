@@ -31,6 +31,14 @@ class SettingsActivity : Activity() {
     private lateinit var deviceList: LinearLayout
     private lateinit var updateStatus: TextView
     private lateinit var updateButton: Button
+    private lateinit var statusView: TextView
+    private val handler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val statusTicker = object : Runnable {
+        override fun run() {
+            statusView.text = AlertService.statusLine ?: "꺼짐 · 차량 Bluetooth가 연결되면 자동으로 시작합니다"
+            handler.postDelayed(this, 1000)
+        }
+    }
     private var editingDevices = false
     private var pendingRelease: Updater.Release? = null
     private var missingPermissions = 0
@@ -41,6 +49,10 @@ class SettingsActivity : Activity() {
         deviceList = vertical()
         updateStatus = caption("")
         updateButton = button("업데이트 확인") { onUpdateClicked() }
+        statusView = TextView(this).apply {
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+            setPadding(0, 0, 0, dp(8))
+        }
 
         actionBar?.hide()
 
@@ -51,6 +63,8 @@ class SettingsActivity : Activity() {
                 setPadding(0, dp(8), 0, dp(4))
             })
             addView(caption("차량 Bluetooth가 연결되면 전방 단속 카메라를 카카오내비 음성으로 알려줍니다."))
+            addView(heading("현재 상태"))
+            addView(statusView)
             addView(heading("권한"))
             addView(permissionList)
             addView(heading("차량 Bluetooth"))
@@ -83,12 +97,14 @@ class SettingsActivity : Activity() {
     override fun onResume() {
         super.onResume()
         Updater.foreground = true
+        handler.post(statusTicker)
         refresh()
         checkForUpdate()
     }
 
     override fun onPause() {
         Updater.foreground = false
+        handler.removeCallbacks(statusTicker)
         super.onPause()
     }
 
