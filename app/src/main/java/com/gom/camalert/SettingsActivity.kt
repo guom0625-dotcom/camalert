@@ -32,10 +32,13 @@ class SettingsActivity : Activity() {
     private lateinit var updateStatus: TextView
     private lateinit var updateButton: Button
     private lateinit var statusView: TextView
+    private lateinit var startStopButton: Button
     private val handler = android.os.Handler(android.os.Looper.getMainLooper())
     private val statusTicker = object : Runnable {
         override fun run() {
-            statusView.text = AlertService.statusLine ?: "꺼짐 · 차량 Bluetooth가 연결되면 자동으로 시작합니다"
+            val line = AlertService.statusLine
+            statusView.text = line ?: "꺼짐\n차량 Bluetooth가 연결되면 자동으로 시작합니다"
+            startStopButton.text = if (line == null) "시작" else "종료"
             handler.postDelayed(this, 1000)
         }
     }
@@ -51,7 +54,23 @@ class SettingsActivity : Activity() {
         updateButton = button("업데이트 확인") { onUpdateClicked() }
         statusView = TextView(this).apply {
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+        }
+        // 차량으로 등록하지 않은 차를 탔거나 자동 시작이 안 됐을 때 손으로 켜고 끄는 용도
+        startStopButton = Button(this).apply {
+            minWidth = dp(72)
+            setOnClickListener {
+                if (AlertService.statusLine == null) AlertService.start(this@SettingsActivity)
+                else AlertService.stop(this@SettingsActivity)
+            }
+        }
+        val statusRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
             setPadding(0, 0, 0, dp(8))
+            addView(statusView, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            addView(startStopButton, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                marginStart = dp(12)
+            })
         }
 
         actionBar?.hide()
@@ -64,7 +83,7 @@ class SettingsActivity : Activity() {
             })
             addView(caption("차량 Bluetooth가 연결되면 전방 단속 카메라를 카카오내비 음성으로 알려줍니다."))
             addView(heading("현재 상태"))
-            addView(statusView)
+            addView(statusRow)
             addView(heading("권한"))
             addView(permissionList)
             addView(heading("차량 Bluetooth"))
@@ -72,8 +91,6 @@ class SettingsActivity : Activity() {
             addView(heading("안내 설정"))
             addView(caption("항목을 누르면 펼쳐집니다. 바꾼 설정은 바로 적용됩니다."))
             addView(guidanceSettings())
-            addView(heading("테스트"))
-            addView(button("지금 시작") { AlertService.start(this@SettingsActivity) }, buttonParams())
             addView(heading("업데이트"))
             addView(updateStatus)
             addView(updateButton, buttonParams())
