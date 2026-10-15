@@ -70,7 +70,7 @@ class SettingsActivity : Activity() {
             addView(heading("차량 Bluetooth"))
             addView(deviceList)
             addView(heading("안내 설정"))
-            addView(caption("바꾼 설정은 바로 적용됩니다."))
+            addView(caption("항목을 누르면 펼쳐집니다. 바꾼 설정은 바로 적용됩니다."))
             addView(guidanceSettings())
             addView(heading("테스트"))
             addView(button("지금 시작") { AlertService.start(this@SettingsActivity) }, buttonParams())
@@ -236,67 +236,118 @@ class SettingsActivity : Activity() {
     private fun guidanceSettings(): LinearLayout {
         val prefs = Prefs(this)
         val box = vertical()
+        val summaries = mutableListOf<() -> Unit>()
+        val changed = { summaries.forEach { it() } }
 
-        box.addView(subheading(GuidanceGroup.CAMERA.title))
-        itemChecks(prefs, GuidanceGroup.CAMERA).forEach(box::addView)
+        fun section(title: String, summary: () -> String, content: LinearLayout) {
+            val (header, update) = expandable(title, summary, content)
+            summaries += update
+            box.addView(header)
+            box.addView(content)
+        }
 
-        box.addView(subheading("안내 시작 거리"))
-        val distances = listOf(1000 to "1km", 500 to "500m", 300 to "300m")
-        box.addView(caption("고속도로"))
-        box.addView(choices(distances, prefs.highwayDistance) { prefs.highwayDistance = it })
-        box.addView(caption("일반도로"))
-        box.addView(choices(distances, prefs.localDistance) { prefs.localDistance = it })
+        fun itemSummary(group: GuidanceGroup): String {
+            val items = GuidanceItem.entries.filter { it.group == group }
+            val on = items.count(prefs::isOn)
+            return when (on) {
+                items.size -> "모두 켬"
+                0 -> "모두 끔"
+                else -> "${items.size}개 중 ${on}개 켬"
+            }
+        }
 
-        box.addView(subheading("과속 경고음"))
-        box.addView(choices(
-            listOf(Prefs.OVERSPEED_OFF to "끄기", Prefs.OVERSPEED_EXCEPT_MOBILE to "이동식 제외", Prefs.OVERSPEED_ALL to "모두"),
-            prefs.overspeedMode,
-        ) { prefs.overspeedMode = it })
-        box.addView(caption("경고 기준 (제한속도 대비)"))
-        box.addView(choices(listOf(0 to "즉시", 5 to "5% 초과", 10 to "10% 초과"), prefs.overspeedPercent) {
-            prefs.overspeedPercent = it
+        section(GuidanceGroup.CAMERA.title, { itemSummary(GuidanceGroup.CAMERA) }, vertical().apply {
+            itemChecks(prefs, GuidanceGroup.CAMERA, changed).forEach { addView(it) }
         })
 
-        box.addView(subheading("음량"))
-        val volumeLabel = caption("${prefs.volume}%")
-        box.addView(SeekBar(this).apply {
-            max = 100
-            progress = prefs.volume
-            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-                override fun onProgressChanged(bar: SeekBar, value: Int, fromUser: Boolean) {
-                    volumeLabel.text = "$value%"
-                    if (fromUser) prefs.volume = value
-                }
-                override fun onStartTrackingTouch(bar: SeekBar) {}
-                override fun onStopTrackingTouch(bar: SeekBar) {}
+        val distances = listOf(1000 to "1km", 500 to "500m", 300 to "300m")
+        fun distanceLabel(m: Int) = distances.first { it.first == m }.second
+        section("안내 시작 거리", {
+            "고속도로 ${distanceLabel(prefs.highwayDistance)} · 일반도로 ${distanceLabel(prefs.localDistance)}"
+        }, vertical().apply {
+            addView(caption("고속도로"))
+            addView(choices(distances, prefs.highwayDistance) { prefs.highwayDistance = it; changed() })
+            addView(caption("일반도로"))
+            addView(choices(distances, prefs.localDistance) { prefs.localDistance = it; changed() })
+        })
+
+        val modes = listOf(Prefs.OVERSPEED_OFF to "끄기", Prefs.OVERSPEED_EXCEPT_MOBILE to "이동식 제외", Prefs.OVERSPEED_ALL to "모두")
+        val thresholds = listOf(0 to "즉시", 5 to "5% 초과", 10 to "10% 초과")
+        section("과속 경고음", {
+            val mode = modes.first { it.first == prefs.overspeedMode }.second
+            if (prefs.overspeedMode == Prefs.OVERSPEED_OFF) mode
+            else "$mode · ${thresholds.first { it.first == prefs.overspeedPercent }.second}"
+        }, vertical().apply {
+            addView(choices(modes, prefs.overspeedMode) { prefs.overspeedMode = it; changed() })
+            addView(caption("경고 기준 (제한속도 대비)"))
+            addView(choices(thresholds, prefs.overspeedPercent) { prefs.overspeedPercent = it; changed() })
+        })
+
+        section("음량", { "${prefs.volume}%" }, vertical().apply {
+            addView(SeekBar(this@SettingsActivity).apply {
+                max = 100
+                progress = prefs.volume
+                setPadding(dp(8), dp(12), dp(8), dp(12))
+                setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                    override fun onProgressChanged(bar: SeekBar, value: Int, fromUser: Boolean) {
+                        if (fromUser) prefs.volume = value
+                        changed()
+                    }
+                    override fun onStartTrackingTouch(bar: SeekBar) {}
+                    override fun onStopTrackingTouch(bar: SeekBar) {}
+                })
             })
         })
-        box.addView(volumeLabel)
 
-        // 나머지 항목은 접어 둠
-        val details = vertical().apply { visibility = View.GONE }
         for (group in listOf(GuidanceGroup.ENFORCEMENT, GuidanceGroup.HAZARD, GuidanceGroup.INFO)) {
-            details.addView(subheading(group.title))
-            itemChecks(prefs, group).forEach(details::addView)
+            section(group.title, { itemSummary(group) }, vertical().apply {
+                itemChecks(prefs, group, changed).forEach { addView(it) }
+            })
         }
-        val toggle = button("상세 안내 항목 펼치기 ▼") {}
-        toggle.setOnClickListener {
-            val open = details.visibility != View.VISIBLE
-            details.visibility = if (open) View.VISIBLE else View.GONE
-            toggle.text = if (open) "상세 안내 항목 접기 ▲" else "상세 안내 항목 펼치기 ▼"
-        }
-        box.addView(toggle, buttonParams())
-        box.addView(details)
         return box
     }
 
-    private fun itemChecks(prefs: Prefs, group: GuidanceGroup) =
+    /** 누르면 펼쳐지는 한 줄. 접혀 있을 땐 제목과 현재 값만 보임. 반환값: (헤더, 요약 갱신 함수) */
+    private fun expandable(title: String, summary: () -> String, content: View): Pair<View, () -> Unit> {
+        content.visibility = View.GONE
+        content.setPadding(dp(12), 0, 0, dp(8))
+        val value = TextView(this).apply { alpha = 0.7f }
+        val arrow = TextView(this).apply { text = "▼" }
+        val header = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            minimumHeight = dp(52)
+            isClickable = true
+            setBackgroundResource(android.R.drawable.list_selector_background)
+            addView(TextView(this@SettingsActivity).apply {
+                text = title
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+            }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            addView(value, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                marginEnd = dp(12)
+            })
+            addView(arrow)
+            setOnClickListener {
+                val open = content.visibility != View.VISIBLE
+                content.visibility = if (open) View.VISIBLE else View.GONE
+                arrow.text = if (open) "▲" else "▼"
+            }
+        }
+        val update = { value.text = summary() }
+        update()
+        return header to update
+    }
+
+    private fun itemChecks(prefs: Prefs, group: GuidanceGroup, onChange: () -> Unit) =
         GuidanceItem.entries.filter { it.group == group }.map { item ->
             CheckBox(this).apply {
                 text = item.label
                 isChecked = prefs.isOn(item)
                 setPadding(dp(8), dp(6), 0, dp(6))
-                setOnCheckedChangeListener { _, checked -> prefs.setOn(item, checked) }
+                setOnCheckedChangeListener { _, checked ->
+                    prefs.setOn(item, checked)
+                    onChange()
+                }
             }
         }
 
@@ -382,13 +433,6 @@ class SettingsActivity : Activity() {
         this.text = text
         setTextSize(TypedValue.COMPLEX_UNIT_SP, 20f)
         setPadding(0, dp(28), 0, dp(8))
-    }
-
-    private fun subheading(text: String) = TextView(this).apply {
-        this.text = text
-        setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
-        setTypeface(typeface, android.graphics.Typeface.BOLD)
-        setPadding(0, dp(16), 0, dp(4))
     }
 
     private fun caption(text: String) = TextView(this).apply {
