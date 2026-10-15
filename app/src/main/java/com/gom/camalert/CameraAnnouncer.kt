@@ -3,7 +3,9 @@ package com.gom.camalert
 enum class CameraKind(val label: String) {
     SPEED("과속 카메라"),
     SIGNAL("신호 과속 카메라"),
-    SECTION("구간 단속"),
+    SIGNAL_ONLY("신호 위반 카메라"),
+    SECTION("구간 단속 시작"),
+    SECTION_END("구간 단속 종료"),
     MOBILE("이동식 단속 구간"),
     CHILD_ZONE("어린이 보호구역"),
     OTHER("단속 카메라"),

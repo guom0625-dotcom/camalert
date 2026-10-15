@@ -16,6 +16,12 @@ android {
         targetSdk = 35
         versionCode = runNumber
         versionName = "0.1.$runNumber"
+        // GitHub Secrets의 KAKAO_NATIVE_APP_KEY. 없으면 빈 문자열로 빌드되고 카메라 정보 없이 동작
+        buildConfigField("String", "KAKAO_APP_KEY", "\"${System.getenv("KAKAO_NATIVE_APP_KEY") ?: ""}\"")
+    }
+
+    buildFeatures {
+        buildConfig = true
     }
 
     signingConfigs {
@@ -50,5 +56,6 @@ android {
 }
 
 dependencies {
+    implementation("com.kakaomobility.knsdk:knsdk:1.12.8-hotfix03")
     testImplementation("junit:junit:4.13.2")
 }

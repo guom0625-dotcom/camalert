@@ -35,7 +35,7 @@ class AlertService : Service(), LocationListener {
     override fun onCreate() {
         super.onCreate()
         voice = Voice(this)
-        source = NoCameraSource()
+        source = if (KakaoCameraSource.available) KakaoCameraSource(application) else NoCameraSource()
         createChannels(this)
     }
 
@@ -88,11 +88,14 @@ class AlertService : Service(), LocationListener {
     }
 
     private fun startTracking() {
-        source.start { cameras ->
-            // 멈춤 중에도 안내 상태는 계속 갱신해서, 다시 시작했을 때 지난 카메라를 몰아서 말하지 않게 함
-            val phrases = announcer.update(cameras)
-            if (!paused) phrases.forEach(voice::say)
-        }
+        source.start(
+            onUpdate = { cameras ->
+                // 멈춤 중에도 안내 상태는 계속 갱신해서, 다시 시작했을 때 지난 카메라를 몰아서 말하지 않게 함
+                val phrases = announcer.update(cameras)
+                if (!paused) phrases.forEach(voice::say)
+            },
+            onStatus = ::refreshNotification,
+        )
         if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
             getSystemService(LocationManager::class.java)
                 .requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 0f, this, Looper.getMainLooper())

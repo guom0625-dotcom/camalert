@@ -38,6 +38,7 @@ jobs:
           CAMALERT_KEYSTORE_PASSWORD: ${{ secrets.CAMALERT_KEYSTORE_PASSWORD }}
           CAMALERT_KEY_ALIAS: ${{ secrets.CAMALERT_KEY_ALIAS }}
           CAMALERT_KEY_PASSWORD: ${{ secrets.CAMALERT_KEY_PASSWORD }}
+          KAKAO_NATIVE_APP_KEY: ${{ secrets.KAKAO_NATIVE_APP_KEY }}
         run: gradle --no-daemon :app:testReleaseUnitTest :app:assembleRelease
 
       - uses: actions/upload-artifact@v4
