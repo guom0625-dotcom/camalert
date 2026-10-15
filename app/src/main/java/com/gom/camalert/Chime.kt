@@ -47,6 +47,8 @@ class Chime(context: Context) {
         track.write(pcm, 0, pcm.size)
         val duck = prefs.duckOthers
         if (duck) audio.requestAudioFocus(focus)
+        // 안내 음량 설정을 시작음에도 똑같이 적용
+        track.setVolume(prefs.volume.coerceIn(0, 100) / 100f)
         track.play()
         val durationMs = pcm.size * 1000L / SAMPLE_RATE
         main.postDelayed({

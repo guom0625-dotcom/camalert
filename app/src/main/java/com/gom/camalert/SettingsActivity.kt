@@ -331,9 +331,11 @@ class SettingsActivity : Activity() {
                         changed()
                     }
                     override fun onStartTrackingTouch(bar: SeekBar) {}
-                    override fun onStopTrackingTouch(bar: SeekBar) {}
+                    // 손을 떼면 바뀐 크기로 시작음을 한 번 들려줌
+                    override fun onStopTrackingTouch(bar: SeekBar) = Chime(this@SettingsActivity).start()
                 })
             })
+            addView(caption("바로 적용됩니다. 손을 떼면 그 크기로 미리 들려줍니다."))
             addView(CheckBox(this@SettingsActivity).apply {
                 text = "안내 중 다른 소리 줄이기 (음악 등)"
                 isChecked = prefs.duckOthers

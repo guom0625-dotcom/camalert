@@ -56,6 +56,11 @@ class KakaoCameraSource(private val app: Application) : CameraSource, KNGuidance
     private var guidance: KNDriveGuidance? = null
     private var active = false
     @Volatile private var speedKmh: Float? = null
+    /** 지금 나오고 있는 안내. 설정에서 음량을 바꾸면 바로 반영하려고 들고 있음 */
+    @Volatile private var playing: KNGuide_Voice? = null
+    private val volumeListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+        if (key == "volume") playing?.setVolume(currentVolume())
+    }
 
     // 진단용: SDK가 GPS와 위치/안전 안내를 실제로 받고 있는지 1분 단위로 센다
     @Volatile private var sdkGps = 0
@@ -76,6 +81,7 @@ class KakaoCameraSource(private val app: Application) : CameraSource, KNGuidance
     override fun start(onStatus: () -> Unit) {
         this.onStatus = onStatus
         active = true
+        app.getSharedPreferences("camalert", Context.MODE_PRIVATE).registerOnSharedPreferenceChangeListener(volumeListener)
 
         if (!installed) {
             KNSDK.install(app, File(app.filesDir, "knsdk").absolutePath)
@@ -90,6 +96,8 @@ class KakaoCameraSource(private val app: Application) : CameraSource, KNGuidance
 
     override fun stop() {
         active = false
+        app.getSharedPreferences("camalert", Context.MODE_PRIVATE).unregisterOnSharedPreferenceChangeListener(volumeListener)
+        playing = null
         guidance?.stop()
         guidance = null
         KNSDK.sharedGpsManager()?.stopUpdate(this)
@@ -215,20 +223,23 @@ class KakaoCameraSource(private val app: Application) : CameraSource, KNGuidance
             else -> false
         }
         if (play) {
-            voiceGuide.setVolume(prefs.volume.coerceIn(0, 100) / 100f)
+            voiceGuide.setVolume(currentVolume())
             voiceGuide.setAudioAttribute(attributes)
         }
-        DiagLog.log(app, (if (play) "안내 재생: " else "안내 거름 (${filterReason(guidance, voiceGuide, safety)}): ") + what)
+        DiagLog.log(app, (if (play) "안내 재생 (음량 ${prefs.volume}%): " else "안내 거름 (${filterReason(guidance, voiceGuide, safety)}): ") + what)
         return play
     }
 
     override fun willPlayVoiceGuide(guidance: KNGuidance, voiceGuide: KNGuide_Voice) {
+        playing = voiceGuide
+        voiceGuide.setVolume(currentVolume())
         if (!prefs.duckOthers) return
         val granted = audio.requestAudioFocus(focus) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
         if (!granted) DiagLog.log(app, "오디오 포커스 거부됨 (다른 앱이 소리를 점유 중)")
     }
 
     override fun didFinishPlayVoiceGuide(guidance: KNGuidance, voiceGuide: KNGuide_Voice) {
+        if (playing === voiceGuide) playing = null
         audio.abandonAudioFocusRequest(focus)
     }
 
@@ -270,6 +281,8 @@ class KakaoCameraSource(private val app: Application) : CameraSource, KNGuidance
             "KNVoiceCode_Alert", "KNVoiceCode_Alram" -> "과속 경고 설정 (모드=${prefs.overspeedMode}, 기준=${prefs.overspeedPercent}%)"
             else -> "길 안내 음성"
         }
+
+    private fun currentVolume() = prefs.volume.coerceIn(0, 100) / 100f
 
     private fun setStatus(text: String) {
         status = text
