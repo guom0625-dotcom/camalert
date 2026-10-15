@@ -10,6 +10,8 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import com.kakaomobility.knsdk.KNLanguageType
+import com.kakaomobility.knsdk.KNRouteAvoidOption
+import com.kakaomobility.knsdk.KNRoutePriority
 import com.kakaomobility.knsdk.KNSDK
 import com.kakaomobility.knsdk.KNSDKInitState
 import com.kakaomobility.knsdk.guidance.knguidance.KNDriveGuidance
@@ -77,6 +79,14 @@ class KakaoCameraSource(private val app: Application) : CameraSource, KNGuidance
         speedKmh = if (location.hasSpeed()) location.speed * 3.6f else null
     }
 
+    /** SDK가 도로 위 위치를 잡고 있는지 */
+    override fun diag(): String {
+        val g = guidance ?: return "카카오 안내 꺼짐"
+        val here = g.locationGuide?.let { it.location ?: it.locationForPrimaryRoute }
+            ?: return "카카오 상태=${g.guideState.name.removePrefix("KNGuideState_")} 위치 없음"
+        return "카카오 상태=${g.guideState.name.removePrefix("KNGuideState_")} 도로=${here.roadType?.name?.removePrefix("KNRoadType_")}"
+    }
+
     private fun initialize() {
         DiagLog.log(app, "카카오 SDK 초기화 시작")
         setStatus("카카오내비 인증 중…")
@@ -109,8 +119,11 @@ class KakaoCameraSource(private val app: Application) : CameraSource, KNGuidance
         // 모든 단계의 안내를 받아서 거리 설정으로 직접 거름
         shared.safetyFreqModeNormalWay = KNGuideFrequencyMode.KNGuideFrequencyMode_Always
         shared.safetyFreqModeHighWay = KNGuideFrequencyMode.KNGuideFrequencyMode_Always
+        // 화면이 꺼져 있거나 앱 화면이 없으면 SDK는 '백그라운드'로 보고 위치 갱신을 버린다.
+        // 이 앱은 항상 백그라운드에서 돌아가므로 반드시 켜야 안내가 나온다.
+        shared.useBackgroundUpdate = true
         shared.voiceGuideDelegate = this
-        shared.startWithoutTrip()
+        shared.startWithTrip(null, KNRoutePriority.KNRoutePriority_Recommand, KNRouteAvoidOption.KNRouteAvoidOption_None.value)
         DiagLog.log(app, "카카오 안전운행 모드 시작")
         guidance = shared
         setStatus("전방 카메라 감시 중 (카카오내비)")

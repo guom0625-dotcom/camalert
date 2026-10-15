@@ -87,7 +87,7 @@ class AlertService : Service(), LocationListener {
         if (now - lastLocationLog >= 60_000) {
             lastLocationLog = now
             val speed = if (location.hasSpeed()) "${(location.speed * 3.6f).toInt()}km/h" else "속도 없음"
-            DiagLog.log(this, "GPS 수신 중 · $speed · 정확도 ${location.accuracy.toInt()}m")
+            DiagLog.log(this, "GPS 수신 중 · $speed · 정확도 ${location.accuracy.toInt()}m" + source.diag().let { if (it.isEmpty()) "" else " · $it" })
         }
     }
 

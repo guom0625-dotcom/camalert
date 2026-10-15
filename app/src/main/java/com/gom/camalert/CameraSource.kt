@@ -13,6 +13,8 @@ interface CameraSource {
     /** onStatus는 status가 바뀔 때 호출됨 (알림창 갱신용) */
     fun start(onStatus: () -> Unit)
     fun onLocation(location: Location) {}
+    /** 진단 기록용 한 줄 요약 (없으면 빈 문자열) */
+    fun diag(): String = ""
     fun stop()
 }
 
