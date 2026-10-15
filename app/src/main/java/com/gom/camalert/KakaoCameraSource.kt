@@ -122,7 +122,7 @@ class KakaoCameraSource(private val app: Application) :
     }
 
     // SDK 음성은 쓰지 않음 (앱 TTS와 겹치지 않게)
-    override fun shouldPlayVoiceGuide(guidance: KNGuidance, voiceGuide: KNGuide_Voice, newData: List<ByteArray>) = false
+    override fun shouldPlayVoiceGuide(guidance: KNGuidance, voiceGuide: KNGuide_Voice, newData: MutableList<ByteArray>) = false
     override fun willPlayVoiceGuide(guidance: KNGuidance, voiceGuide: KNGuide_Voice) {}
     override fun didFinishPlayVoiceGuide(guidance: KNGuidance, voiceGuide: KNGuide_Voice) {}
 
