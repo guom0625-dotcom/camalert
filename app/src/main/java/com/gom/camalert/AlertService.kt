@@ -150,7 +150,7 @@ class AlertService : Service(), LocationListener {
             action(android.R.drawable.ic_media_pause, "⏸ 멈춤", servicePending(this, ACTION_PAUSE))
         }
         return Notification.Builder(this, CHANNEL_RUNNING)
-            .setSmallIcon(R.drawable.ic_stat_camera)
+            .setSmallIcon(R.drawable.ic_stat_dog)
             .setContentTitle(title)
             .setContentText(source.status)
             .setContentIntent(settingsPending(this))
@@ -218,7 +218,7 @@ class AlertService : Service(), LocationListener {
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
             )
             val notification = Notification.Builder(context, CHANNEL_CONNECTED)
-                .setSmallIcon(R.drawable.ic_stat_camera)
+                .setSmallIcon(R.drawable.ic_stat_dog)
                 .setContentTitle("차량 연결됨")
                 .setContentText("눌러서 카메라 알림 시작 (자동 시작은 설정에서 배터리 최적화 제외 필요)")
                 .setContentIntent(pending)

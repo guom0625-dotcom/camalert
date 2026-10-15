@@ -172,7 +172,7 @@ object Updater {
             manager.notify(
                 NOTIFICATION_ID,
                 Notification.Builder(context, CHANNEL)
-                    .setSmallIcon(R.drawable.ic_stat_camera)
+                    .setSmallIcon(R.drawable.ic_stat_dog)
                     .setContentTitle("gomCamalert 새 버전")
                     .setContentText("눌러서 업데이트 설치")
                     .setContentIntent(pending)
