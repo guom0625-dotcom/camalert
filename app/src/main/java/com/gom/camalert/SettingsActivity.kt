@@ -90,24 +90,12 @@ class SettingsActivity : Activity() {
             addView(permissionList)
             addView(heading("차량 Bluetooth"))
             addView(deviceList)
-            // 안내 설정 전체도 평소엔 접어 둠
-            val guidance = vertical().apply {
-                visibility = View.GONE
+            // 안내 설정, 진단 기록은 평소엔 접어 둠
+            collapsibleSection(this, "안내 설정", vertical().apply {
                 addView(caption("항목을 누르면 펼쳐집니다. 바꾼 설정은 바로 적용됩니다."))
                 addView(guidanceSettings())
-            }
-            addView(heading("안내 설정  ▼").apply {
-                isClickable = true
-                setBackgroundResource(android.R.drawable.list_selector_background)
-                setOnClickListener {
-                    val open = guidance.visibility != View.VISIBLE
-                    guidance.visibility = if (open) View.VISIBLE else View.GONE
-                    text = if (open) "안내 설정  ▲" else "안내 설정  ▼"
-                }
             })
-            addView(guidance)
-            addView(heading("진단 기록"))
-            addView(diagnostics())
+            collapsibleSection(this, "진단 기록", diagnostics())
             addView(heading("업데이트"))
             addView(updateStatus)
             addView(updateButton, buttonParams())
@@ -265,6 +253,21 @@ class SettingsActivity : Activity() {
                 refreshDevices()
             }, buttonParams())
         }
+    }
+
+    /** 누르면 펼쳐지는 섹션 제목 */
+    private fun collapsibleSection(parent: LinearLayout, title: String, content: View) {
+        content.visibility = View.GONE
+        parent.addView(heading("$title  ▼").apply {
+            isClickable = true
+            setBackgroundResource(android.R.drawable.list_selector_background)
+            setOnClickListener {
+                val open = content.visibility != View.VISIBLE
+                content.visibility = if (open) View.VISIBLE else View.GONE
+                text = if (open) "$title  ▲" else "$title  ▼"
+            }
+        })
+        parent.addView(content)
     }
 
     private fun guidanceSettings(): LinearLayout {
