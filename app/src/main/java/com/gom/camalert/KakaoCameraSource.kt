@@ -2,6 +2,10 @@ package com.gom.camalert
 
 import android.app.Application
 import android.content.Context
+import android.location.Location
+import android.media.AudioAttributes
+import android.media.AudioFocusRequest
+import android.media.AudioManager
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -10,11 +14,8 @@ import com.kakaomobility.knsdk.KNSDK
 import com.kakaomobility.knsdk.KNSDKInitState
 import com.kakaomobility.knsdk.guidance.knguidance.KNDriveGuidance
 import com.kakaomobility.knsdk.guidance.knguidance.KNGuidance
-import com.kakaomobility.knsdk.guidance.knguidance.KNGuidance_LocationGuideDelegate
-import com.kakaomobility.knsdk.guidance.knguidance.KNGuidance_SafetyGuideDelegate
 import com.kakaomobility.knsdk.guidance.knguidance.KNGuidance_VoiceGuideDelegate
-import com.kakaomobility.knsdk.guidance.knguidance.locationguide.KNGuide_Location
-import com.kakaomobility.knsdk.guidance.knguidance.safetyguide.KNGuide_Safety
+import com.kakaomobility.knsdk.guidance.knguidance.KNGuideFrequencyMode
 import com.kakaomobility.knsdk.guidance.knguidance.safetyguide.objects.KNSafety
 import com.kakaomobility.knsdk.guidance.knguidance.safetyguide.objects.KNSafety_Camera
 import com.kakaomobility.knsdk.guidance.knguidance.voiceguide.KNGuide_Voice
@@ -22,30 +23,35 @@ import java.io.File
 import java.util.UUID
 
 /**
- * 카카오내비 SDK 안전운행 모드(목적지 없는 주행)로 전방 단속 카메라를 받는다.
- * SDK 자체 음성은 끄고, 거리 계산만 해서 CameraAnnouncer로 넘긴다.
+ * 카카오내비 SDK 안전운행 모드(목적지 없는 주행).
+ * 안내 음성과 경고음은 카카오 것을 그대로 쓰고, 설정에 따라 어떤 안내를 낼지만 고른다.
  */
-class KakaoCameraSource(private val app: Application) :
-    CameraSource,
-    KNGuidance_SafetyGuideDelegate,
-    KNGuidance_LocationGuideDelegate,
-    KNGuidance_VoiceGuideDelegate {
+class KakaoCameraSource(private val app: Application) : CameraSource, KNGuidance_VoiceGuideDelegate {
 
     @Volatile
     override var status = "카카오내비 연결 중…"
         private set
 
+    @Volatile
+    override var muted = false
+
+    private val prefs = Prefs(app)
     private val main = Handler(Looper.getMainLooper())
-    private var onUpdate: ((List<UpcomingCamera>) -> Unit)? = null
     private var onStatus: (() -> Unit)? = null
     private var guidance: KNDriveGuidance? = null
     private var active = false
+    @Volatile private var speedKmh: Float? = null
 
-    private var onGuide: List<KNSafety> = emptyList()
-    private var around: List<KNSafety> = emptyList()
+    private val audio = app.getSystemService(AudioManager::class.java)
+    private val attributes = AudioAttributes.Builder()
+        .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
+        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+        .build()
+    private val focus = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+        .setAudioAttributes(attributes)
+        .build()
 
-    override fun start(onUpdate: (List<UpcomingCamera>) -> Unit, onStatus: () -> Unit) {
-        this.onUpdate = onUpdate
+    override fun start(onStatus: () -> Unit) {
         this.onStatus = onStatus
         active = true
 
@@ -64,8 +70,11 @@ class KakaoCameraSource(private val app: Application) :
         active = false
         guidance?.stop()
         guidance = null
-        onGuide = emptyList()
-        around = emptyList()
+        audio.abandonAudioFocusRequest(focus)
+    }
+
+    override fun onLocation(location: Location) {
+        speedKmh = if (location.hasSpeed()) location.speed * 3.6f else null
     }
 
     private fun initialize() {
@@ -95,56 +104,59 @@ class KakaoCameraSource(private val app: Application) :
             setStatus("카카오내비 안내를 시작하지 못했습니다")
             return
         }
-        shared.safetyGuideDelegate = this
-        shared.locationGuideDelegate = this
+        // 모든 단계의 안내를 받아서 거리 설정으로 직접 거름
+        shared.safetyFreqModeNormalWay = KNGuideFrequencyMode.KNGuideFrequencyMode_Always
+        shared.safetyFreqModeHighWay = KNGuideFrequencyMode.KNGuideFrequencyMode_Always
         shared.voiceGuideDelegate = this
         shared.startWithoutTrip()
         guidance = shared
         setStatus("전방 카메라 감시 중 (카카오내비)")
     }
 
-    override fun guidanceDidUpdateSafetyGuide(guidance: KNGuidance, safetyGuide: KNGuide_Safety?) {
-        main.post {
-            onGuide = safetyGuide?.safetiesOnGuide.orEmpty()
-            publish(guidance)
+    override fun shouldPlayVoiceGuide(guidance: KNGuidance, voiceGuide: KNGuide_Voice, newData: MutableList<ByteArray>): Boolean {
+        if (!active || muted) return false
+        val safety = voiceGuide.guideObj as? KNSafety
+        val play = when (voiceGuide.voiceCode.name) {
+            "KNVoiceCode_Safety" -> safety != null && allowed(guidance, safety)
+            "KNVoiceCode_SchoolZone" -> prefs.isOn(GuidanceItem.CHILD_ZONE)
+            // 과속 경고음
+            "KNVoiceCode_Alert", "KNVoiceCode_Alram" -> shouldWarnOverspeed(
+                mode = prefs.overspeedMode,
+                thresholdPercent = prefs.overspeedPercent,
+                isMobileCamera = safety?.code?.name == "KNSafetyCode_MovableSpeedViolationCamera",
+                speedKmh = speedKmh,
+                limit = (safety as? KNSafety_Camera)?.speedLimit,
+            )
+            // 길 안내 관련 음성(경로 이탈, 회전 등)은 안전운행 모드에서 쓰지 않음
+            else -> false
         }
-    }
-
-    override fun guidanceDidUpdateAroundSafeties(guidance: KNGuidance, safeties: List<KNSafety>?) {
-        main.post {
-            around = safeties.orEmpty()
-            publish(guidance)
+        if (play) {
+            voiceGuide.setVolume(prefs.volume.coerceIn(0, 100) / 100f)
+            voiceGuide.setAudioAttribute(attributes)
         }
+        return play
     }
 
-    override fun guidanceDidUpdateLocation(guidance: KNGuidance, locationGuide: KNGuide_Location) {
-        main.post { publish(guidance) }
+    override fun willPlayVoiceGuide(guidance: KNGuidance, voiceGuide: KNGuide_Voice) {
+        audio.requestAudioFocus(focus)
     }
 
-    // SDK 음성은 쓰지 않음 (앱 TTS와 겹치지 않게)
-    override fun shouldPlayVoiceGuide(guidance: KNGuidance, voiceGuide: KNGuide_Voice, newData: MutableList<ByteArray>) = false
-    override fun willPlayVoiceGuide(guidance: KNGuidance, voiceGuide: KNGuide_Voice) {}
-    override fun didFinishPlayVoiceGuide(guidance: KNGuidance, voiceGuide: KNGuide_Voice) {}
+    override fun didFinishPlayVoiceGuide(guidance: KNGuidance, voiceGuide: KNGuide_Voice) {
+        audio.abandonAudioFocusRequest(focus)
+    }
 
-    private fun publish(guidance: KNGuidance) {
-        if (!active || guidance !== this.guidance) return
-        val here = guidance.locationGuide?.let { it.location ?: it.locationForPrimaryRoute } ?: return
+    /** 켜 둔 항목이고, 안내 시작 거리 안쪽일 때만 */
+    private fun allowed(guidance: KNGuidance, safety: KNSafety): Boolean {
+        val item = GuidanceItem.of(safety.code.name) ?: return false
+        if (!prefs.isOn(item)) return false
 
-        val cameras = (onGuide + around)
-            .distinctBy { "${it.code.name}:${it.safetyId}" }
-            .mapNotNull { safety ->
-                val kind = kindOf(safety.code.name) ?: return@mapNotNull null
-                if (safety.passed || safety.location.route != here.route) return@mapNotNull null
-                val distance = safety.location.distFromS - here.distFromS
-                if (distance < 0) return@mapNotNull null
-                UpcomingCamera(
-                    id = "${safety.code.name}:${safety.safetyId}",
-                    distanceMeters = distance,
-                    kind = kind,
-                    speedLimit = (safety as? KNSafety_Camera)?.speedLimit?.takeIf { it > 0 },
-                )
-            }
-        onUpdate?.invoke(cameras)
+        val here = guidance.locationGuide?.let { it.location ?: it.locationForPrimaryRoute } ?: return true
+        if (safety.location.route != here.route) return true
+        val distance = safety.location.distFromS - here.distFromS
+        val highway = here.roadType?.name == "KNRoadType_Highway"
+        val limit = if (highway) prefs.highwayDistance else prefs.localDistance
+        // 안내 지점이 기준 거리보다 약간 앞서 나오는 경우를 감안해 여유를 둠
+        return distance <= limit + DISTANCE_MARGIN
     }
 
     private fun setStatus(text: String) {
@@ -154,37 +166,11 @@ class KakaoCameraSource(private val app: Application) :
 
     companion object {
         private const val TAG = "KakaoCameraSource"
+        private const val DISTANCE_MARGIN = 150
         private var installed = false
 
         /** 앱 키가 들어간 빌드인지 */
         val available get() = BuildConfig.KAKAO_APP_KEY.isNotEmpty()
-
-        /**
-         * 안내할 카메라만 고른다. SDK 버전마다 enum이 조금씩 달라서 이름으로 비교.
-         * 주차·버스전용·적재·안전띠 단속 등은 제외.
-         */
-        fun kindOf(code: String): CameraKind? {
-            val name = code.removePrefix("KNSafetyCode_")
-            return when {
-                name.startsWith("SpeedViolationSectionIn") -> CameraKind.SECTION
-                name.startsWith("SpeedViolationSectionOut") -> CameraKind.SECTION_END
-                name.startsWith("SignalAndSpeedViolation") -> CameraKind.SIGNAL
-                name == "SignalViolationCamera" -> CameraKind.SIGNAL_ONLY
-                name == "MovableSpeedViolationCamera" -> CameraKind.MOBILE
-                name == "ChildrenProtectionZone" -> CameraKind.CHILD_ZONE
-                name in SPEED -> CameraKind.SPEED
-                else -> null
-            }
-        }
-
-        private val SPEED = setOf(
-            "SpeedViolationCamera",
-            "SpeedViolationBackwardCamera",
-            "ViolationCamera",
-            "BoxedSpeedViolationCamera",
-            "BuslaneAndSpeedViolationCamera",
-            "LaneAndSpeedViolationCamera",
-        )
 
         private fun userKey(context: Context): String {
             val prefs = context.getSharedPreferences("camalert", Context.MODE_PRIVATE)

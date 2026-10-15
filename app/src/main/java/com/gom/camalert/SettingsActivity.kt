@@ -18,17 +18,19 @@ import android.view.WindowInsets
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.LinearLayout
+import android.widget.RadioButton
+import android.widget.RadioGroup
 import android.widget.ScrollView
+import android.widget.SeekBar
 import android.widget.TextView
 
-/** 유일한 화면: 권한 상태 확인 + 차량 Bluetooth 선택 */
+/** 유일한 화면: 권한 상태, 차량 Bluetooth 선택, 안내 설정 */
 class SettingsActivity : Activity() {
 
     private lateinit var permissionList: LinearLayout
     private lateinit var deviceList: LinearLayout
     private lateinit var updateStatus: TextView
     private lateinit var updateButton: Button
-    private var voice: Voice? = null
     private var editingDevices = false
     private var pendingRelease: Updater.Release? = null
     private var missingPermissions = 0
@@ -48,16 +50,15 @@ class SettingsActivity : Activity() {
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 28f)
                 setPadding(0, dp(8), 0, dp(4))
             })
-            addView(caption("차량 Bluetooth가 연결되면 전방 단속 카메라를 음성으로 알려줍니다."))
+            addView(caption("차량 Bluetooth가 연결되면 전방 단속 카메라를 카카오내비 음성으로 알려줍니다."))
             addView(heading("권한"))
             addView(permissionList)
             addView(heading("차량 Bluetooth"))
             addView(deviceList)
+            addView(heading("안내 설정"))
+            addView(caption("바꾼 설정은 바로 적용됩니다."))
+            addView(guidanceSettings())
             addView(heading("테스트"))
-            addView(button("음성 테스트") {
-                val v = voice ?: Voice(this@SettingsActivity).also { voice = it }
-                v.say("600미터 앞 신호 과속 카메라, 제한속도 60")
-            }, buttonParams())
             addView(button("지금 시작") { AlertService.start(this@SettingsActivity) }, buttonParams())
             addView(heading("업데이트"))
             addView(updateStatus)
@@ -89,11 +90,6 @@ class SettingsActivity : Activity() {
     override fun onPause() {
         Updater.foreground = false
         super.onPause()
-    }
-
-    override fun onDestroy() {
-        voice?.shutdown()
-        super.onDestroy()
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
@@ -221,6 +217,88 @@ class SettingsActivity : Activity() {
         }
     }
 
+    private fun guidanceSettings(): LinearLayout {
+        val prefs = Prefs(this)
+        val box = vertical()
+
+        box.addView(subheading(GuidanceGroup.CAMERA.title))
+        itemChecks(prefs, GuidanceGroup.CAMERA).forEach(box::addView)
+
+        box.addView(subheading("안내 시작 거리"))
+        val distances = listOf(1000 to "1km", 500 to "500m", 300 to "300m")
+        box.addView(caption("고속도로"))
+        box.addView(choices(distances, prefs.highwayDistance) { prefs.highwayDistance = it })
+        box.addView(caption("일반도로"))
+        box.addView(choices(distances, prefs.localDistance) { prefs.localDistance = it })
+
+        box.addView(subheading("과속 경고음"))
+        box.addView(choices(
+            listOf(Prefs.OVERSPEED_OFF to "끄기", Prefs.OVERSPEED_EXCEPT_MOBILE to "이동식 제외", Prefs.OVERSPEED_ALL to "모두"),
+            prefs.overspeedMode,
+        ) { prefs.overspeedMode = it })
+        box.addView(caption("경고 기준 (제한속도 대비)"))
+        box.addView(choices(listOf(0 to "즉시", 5 to "5% 초과", 10 to "10% 초과"), prefs.overspeedPercent) {
+            prefs.overspeedPercent = it
+        })
+
+        box.addView(subheading("음량"))
+        val volumeLabel = caption("${prefs.volume}%")
+        box.addView(SeekBar(this).apply {
+            max = 100
+            progress = prefs.volume
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(bar: SeekBar, value: Int, fromUser: Boolean) {
+                    volumeLabel.text = "$value%"
+                    if (fromUser) prefs.volume = value
+                }
+                override fun onStartTrackingTouch(bar: SeekBar) {}
+                override fun onStopTrackingTouch(bar: SeekBar) {}
+            })
+        })
+        box.addView(volumeLabel)
+
+        // 나머지 항목은 접어 둠
+        val details = vertical().apply { visibility = View.GONE }
+        for (group in listOf(GuidanceGroup.ENFORCEMENT, GuidanceGroup.HAZARD, GuidanceGroup.INFO)) {
+            details.addView(subheading(group.title))
+            itemChecks(prefs, group).forEach(details::addView)
+        }
+        val toggle = button("상세 안내 항목 펼치기 ▼") {}
+        toggle.setOnClickListener {
+            val open = details.visibility != View.VISIBLE
+            details.visibility = if (open) View.VISIBLE else View.GONE
+            toggle.text = if (open) "상세 안내 항목 접기 ▲" else "상세 안내 항목 펼치기 ▼"
+        }
+        box.addView(toggle, buttonParams())
+        box.addView(details)
+        return box
+    }
+
+    private fun itemChecks(prefs: Prefs, group: GuidanceGroup) =
+        GuidanceItem.entries.filter { it.group == group }.map { item ->
+            CheckBox(this).apply {
+                text = item.label
+                isChecked = prefs.isOn(item)
+                setPadding(dp(8), dp(6), 0, dp(6))
+                setOnCheckedChangeListener { _, checked -> prefs.setOn(item, checked) }
+            }
+        }
+
+    /** 가로 라디오 버튼 묶음 */
+    private fun choices(options: List<Pair<Int, String>>, selected: Int, onSelect: (Int) -> Unit) =
+        RadioGroup(this).apply {
+            orientation = RadioGroup.HORIZONTAL
+            for ((value, label) in options) {
+                addView(RadioButton(this@SettingsActivity).apply {
+                    id = View.generateViewId()
+                    text = label
+                    isChecked = value == selected
+                    setPadding(0, 0, dp(16), 0)
+                    setOnCheckedChangeListener { _, checked -> if (checked) onSelect(value) }
+                })
+            }
+        }
+
     private fun checkForUpdate() {
         val current = Updater.currentVersionCode(this)
         updateStatus.text = "현재 버전 0.1.$current"
@@ -288,6 +366,13 @@ class SettingsActivity : Activity() {
         this.text = text
         setTextSize(TypedValue.COMPLEX_UNIT_SP, 20f)
         setPadding(0, dp(28), 0, dp(8))
+    }
+
+    private fun subheading(text: String) = TextView(this).apply {
+        this.text = text
+        setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+        setTypeface(typeface, android.graphics.Typeface.BOLD)
+        setPadding(0, dp(16), 0, dp(4))
     }
 
     private fun caption(text: String) = TextView(this).apply {
