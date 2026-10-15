@@ -14,6 +14,7 @@ import android.provider.Settings
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
+import android.view.WindowInsets
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.LinearLayout
@@ -26,14 +27,22 @@ class SettingsActivity : Activity() {
     private lateinit var permissionList: LinearLayout
     private lateinit var deviceList: LinearLayout
     private var voice: Voice? = null
+    private var missingPermissions = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         permissionList = vertical()
         deviceList = vertical()
 
+        actionBar?.hide()
+
         val root = vertical().apply {
-            setPadding(dp(16), dp(24), dp(16), dp(24))
+            addView(TextView(this@SettingsActivity).apply {
+                text = getString(R.string.app_name)
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 28f)
+                setPadding(0, dp(8), 0, dp(4))
+            })
+            addView(caption("차량 Bluetooth가 연결되면 전방 단속 카메라를 음성으로 알려줍니다."))
             addView(heading("권한"))
             addView(permissionList)
             addView(heading("차량 Bluetooth"))
@@ -43,10 +52,23 @@ class SettingsActivity : Activity() {
             addView(button("음성 테스트") {
                 val v = voice ?: Voice(this@SettingsActivity).also { voice = it }
                 v.say("600미터 앞 신호 과속 카메라, 제한속도 60")
-            })
-            addView(button("지금 시작") { AlertService.start(this@SettingsActivity) })
+            }, buttonParams())
+            addView(button("지금 시작") { AlertService.start(this@SettingsActivity) }, buttonParams())
         }
-        setContentView(ScrollView(this).apply { addView(root) })
+        val scroll = ScrollView(this).apply {
+            clipToPadding = false
+            addView(root)
+        }
+        // Android 15부터 화면이 상태바/내비게이션바 밑까지 그려지므로 그만큼 여백을 줌
+        scroll.setPadding(dp(20), dp(16), dp(20), dp(24))
+        if (Build.VERSION.SDK_INT >= 30) {
+            scroll.setOnApplyWindowInsetsListener { view, insets ->
+                val bars = insets.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
+                view.setPadding(dp(20) + bars.left, dp(16) + bars.top, dp(20) + bars.right, dp(24) + bars.bottom)
+                insets
+            }
+        }
+        setContentView(scroll)
     }
 
     override fun onResume() {
@@ -71,6 +93,7 @@ class SettingsActivity : Activity() {
 
     private fun refreshPermissions() {
         permissionList.removeAllViews()
+        missingPermissions = 0
         if (Build.VERSION.SDK_INT >= 33) {
             permissionRow("알림", granted(Manifest.permission.POST_NOTIFICATIONS)) {
                 requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
@@ -98,6 +121,14 @@ class SettingsActivity : Activity() {
             @SuppressLint("BatteryLife")
             val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$packageName"))
             startActivity(intent)
+        }
+        if (missingPermissions == 0) {
+            // 다 허용됐으면 목록 대신 한 줄로
+            permissionList.removeAllViews()
+            permissionList.addView(TextView(this).apply {
+                text = "✅ 모든 권한 허용됨"
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+            })
         }
     }
 
@@ -128,10 +159,11 @@ class SettingsActivity : Activity() {
     }
 
     private fun permissionRow(label: String, ok: Boolean, onFix: () -> Unit) {
+        if (!ok) missingPermissions++
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(0, dp(4), 0, dp(4))
+            minimumHeight = dp(52)
         }
         row.addView(TextView(this).apply {
             text = (if (ok) "✅ " else "⚠️ ") + label
@@ -139,7 +171,10 @@ class SettingsActivity : Activity() {
         }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         if (!ok) row.addView(Button(this).apply {
             text = "허용"
+            minWidth = dp(72)
             setOnClickListener { onFix() }
+        }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+            marginStart = dp(12)
         })
         permissionList.addView(row)
     }
@@ -151,7 +186,7 @@ class SettingsActivity : Activity() {
     private fun heading(text: String) = TextView(this).apply {
         this.text = text
         setTextSize(TypedValue.COMPLEX_UNIT_SP, 20f)
-        setPadding(0, dp(24), 0, dp(8))
+        setPadding(0, dp(28), 0, dp(8))
     }
 
     private fun caption(text: String) = TextView(this).apply {
@@ -164,6 +199,10 @@ class SettingsActivity : Activity() {
         this.text = text
         setOnClickListener(onClick)
     }
+
+    private fun buttonParams() = LinearLayout.LayoutParams(
+        LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT,
+    ).apply { topMargin = dp(8) }
 
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
 }
