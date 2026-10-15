@@ -129,7 +129,7 @@ class AlertService : Service(), LocationListener {
         if (app == navApp) return
         navApp = app
         if (app == null) navOverride = false
-        DiagLog.log(this, if (app != null) "자동 멈춤: $app 길안내 중" else "자동 재개: 내비 길안내 끝남")
+        DiagLog.log(this, if (app != null) "자동 멈춤: $app 실행 중" else "자동 재개: 내비 종료")
         source.muted = muted
         refreshNotification()
     }
@@ -171,7 +171,7 @@ class AlertService : Service(), LocationListener {
     private fun buildNotification(): Notification {
         val title = when {
             paused -> "카메라 알림 멈춤"
-            navPaused -> "카메라 알림 쉬는 중 · $navApp 길안내 중"
+            navPaused -> "카메라 알림 쉬는 중 · $navApp 실행 중"
             else -> "카메라 알림 실행 중"
         }
         val text = if (navPaused && !paused) "내비를 끄면 자동으로 다시 켜집니다" else source.status

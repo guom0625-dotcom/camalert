@@ -363,7 +363,7 @@ class SettingsActivity : Activity() {
 
         section("내비 앱 실행 시", { if (prefs.navAutoPause) "자동 멈춤" else "계속 안내" }, vertical().apply {
             addView(CheckBox(this@SettingsActivity).apply {
-                text = "내비 길안내 중엔 자동으로 멈춤"
+                text = "내비 앱이 실행 중이면 자동으로 멈춤"
                 isChecked = prefs.navAutoPause
                 setPadding(dp(8), dp(6), 0, dp(6))
                 setOnCheckedChangeListener { _, checked ->
@@ -373,7 +373,7 @@ class SettingsActivity : Activity() {
                     changed()
                 }
             })
-            addView(caption("TMAP, 네이버 지도, 카카오내비, 카카오맵이 길안내 중이면 소리 없이 멈추고, 끝나면 다시 켭니다. '알림 접근' 권한이 필요합니다."))
+            addView(caption("TMAP, 네이버 지도, 카카오내비, 카카오맵이 실행 중이면 소리 없이 멈추고, 꺼지면 다시 켭니다. '알림 접근' 권한이 필요합니다."))
         })
 
         for (group in listOf(GuidanceGroup.ENFORCEMENT, GuidanceGroup.HAZARD, GuidanceGroup.INFO)) {
