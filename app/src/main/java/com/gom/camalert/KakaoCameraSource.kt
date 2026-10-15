@@ -14,6 +14,18 @@ import com.kakaomobility.knsdk.KNRouteAvoidOption
 import com.kakaomobility.knsdk.KNRoutePriority
 import com.kakaomobility.knsdk.KNSDK
 import com.kakaomobility.knsdk.KNSDKInitState
+import com.kakaomobility.knsdk.common.gps.KNGPSData
+import com.kakaomobility.knsdk.common.gps.KNGPSReceiver
+import com.kakaomobility.knsdk.common.objects.KNError
+import com.kakaomobility.knsdk.guidance.knguidance.KNGuideRouteChangeReason
+import com.kakaomobility.knsdk.guidance.knguidance.KNGuidance_GuideStateDelegate
+import com.kakaomobility.knsdk.guidance.knguidance.KNGuidance_LocationGuideDelegate
+import com.kakaomobility.knsdk.guidance.knguidance.KNGuidance_SafetyGuideDelegate
+import com.kakaomobility.knsdk.guidance.knguidance.common.KNLocation
+import com.kakaomobility.knsdk.guidance.knguidance.locationguide.KNGuide_Location
+import com.kakaomobility.knsdk.guidance.knguidance.routeguide.objects.KNMultiRouteInfo
+import com.kakaomobility.knsdk.guidance.knguidance.safetyguide.KNGuide_Safety
+import com.kakaomobility.knsdk.trip.kntrip.knroute.KNRoute
 import com.kakaomobility.knsdk.guidance.knguidance.KNDriveGuidance
 import com.kakaomobility.knsdk.guidance.knguidance.KNGuidance
 import com.kakaomobility.knsdk.guidance.knguidance.KNGuidance_VoiceGuideDelegate
@@ -28,7 +40,8 @@ import java.util.UUID
  * 카카오내비 SDK 안전운행 모드(목적지 없는 주행).
  * 안내 음성과 경고음은 카카오 것을 그대로 쓰고, 설정에 따라 어떤 안내를 낼지만 고른다.
  */
-class KakaoCameraSource(private val app: Application) : CameraSource, KNGuidance_VoiceGuideDelegate {
+class KakaoCameraSource(private val app: Application) : CameraSource, KNGuidance_VoiceGuideDelegate,
+    KNGuidance_LocationGuideDelegate, KNGuidance_SafetyGuideDelegate, KNGuidance_GuideStateDelegate, KNGPSReceiver {
 
     @Volatile
     override var status = "카카오내비 연결 중…"
@@ -43,6 +56,13 @@ class KakaoCameraSource(private val app: Application) : CameraSource, KNGuidance
     private var guidance: KNDriveGuidance? = null
     private var active = false
     @Volatile private var speedKmh: Float? = null
+
+    // 진단용: SDK가 GPS와 위치/안전 안내를 실제로 받고 있는지 1분 단위로 센다
+    @Volatile private var sdkGps = 0
+    @Volatile private var sdkGpsValid = 0
+    @Volatile private var locationUpdates = 0
+    @Volatile private var safetyUpdates = 0
+    @Volatile private var aroundSafeties = 0
 
     private val audio = app.getSystemService(AudioManager::class.java)
     private val attributes = AudioAttributes.Builder()
@@ -72,6 +92,7 @@ class KakaoCameraSource(private val app: Application) : CameraSource, KNGuidance
         active = false
         guidance?.stop()
         guidance = null
+        KNSDK.sharedGpsManager()?.stopUpdate(this)
         audio.abandonAudioFocusRequest(focus)
     }
 
@@ -79,13 +100,47 @@ class KakaoCameraSource(private val app: Application) : CameraSource, KNGuidance
         speedKmh = if (location.hasSpeed()) location.speed * 3.6f else null
     }
 
-    /** SDK가 도로 위 위치를 잡고 있는지 */
+    /** SDK가 도로 위 위치를 잡고 있는지 (직전 기록 이후 받은 횟수) */
     override fun diag(): String {
         val g = guidance ?: return "카카오 안내 꺼짐"
         val here = g.locationGuide?.let { it.location ?: it.locationForPrimaryRoute }
-            ?: return "카카오 상태=${g.guideState.name.removePrefix("KNGuideState_")} 위치 없음"
-        return "카카오 상태=${g.guideState.name.removePrefix("KNGuideState_")} 도로=${here.roadType?.name?.removePrefix("KNRoadType_")}"
+        val road = here?.roadType?.name?.removePrefix("KNRoadType_") ?: "위치 없음"
+        val text = "카카오 상태=${g.guideState.name.removePrefix("KNGuideState_")} 도로=$road" +
+            " SDK-GPS=$sdkGps(유효 $sdkGpsValid) 위치갱신=$locationUpdates 안전갱신=$safetyUpdates 주변=$aroundSafeties"
+        sdkGps = 0; sdkGpsValid = 0; locationUpdates = 0; safetyUpdates = 0
+        return text
     }
+
+    override fun didReceiveGpsData(data: KNGPSData) {
+        sdkGps++
+        if (data.valid) sdkGpsValid++
+    }
+
+    override fun guidanceDidUpdateLocation(guidance: KNGuidance, locationGuide: KNGuide_Location) {
+        locationUpdates++
+    }
+
+    override fun guidanceDidUpdateSafetyGuide(guidance: KNGuidance, safetyGuide: KNGuide_Safety?) {
+        safetyUpdates++
+    }
+
+    override fun guidanceDidUpdateAroundSafeties(guidance: KNGuidance, safeties: List<KNSafety>?) {
+        aroundSafeties = safeties?.size ?: 0
+    }
+
+    override fun guidanceGuideStarted(guidance: KNGuidance) = DiagLog.log(app, "카카오: 안내 시작됨")
+    override fun guidanceGuideEnded(guidance: KNGuidance) = DiagLog.log(app, "카카오: 안내 끝남")
+    override fun guidanceCheckingRouteChange(guidance: KNGuidance) {}
+    override fun guidanceRouteUnchanged(guidance: KNGuidance) {}
+    override fun guidanceRouteUnchangedWithError(guidance: KNGuidance, error: KNError) =
+        DiagLog.log(app, "카카오 오류: code=${error.code} msg=${error.msg}")
+    override fun guidanceOutOfRoute(guidance: KNGuidance) {}
+    override fun guidanceRouteChanged(
+        guidance: KNGuidance, fromRoute: KNRoute, fromLocation: KNLocation,
+        toRoute: KNRoute, toLocation: KNLocation, changeReason: KNGuideRouteChangeReason,
+    ) {}
+    override fun guidanceDidUpdateRoutes(guidance: KNGuidance, routes: List<KNRoute>, multiRouteInfo: KNMultiRouteInfo?) {}
+    override fun guidanceDidUpdateIndoorRoute(guidance: KNGuidance, route: KNRoute?) {}
 
     private fun initialize() {
         DiagLog.log(app, "카카오 SDK 초기화 시작")
@@ -123,6 +178,11 @@ class KakaoCameraSource(private val app: Application) : CameraSource, KNGuidance
         // 이 앱은 항상 백그라운드에서 돌아가므로 반드시 켜야 안내가 나온다.
         shared.useBackgroundUpdate = true
         shared.voiceGuideDelegate = this
+        shared.locationGuideDelegate = this
+        shared.safetyGuideDelegate = this
+        shared.guideStateDelegate = this
+        val gps = KNSDK.sharedGpsManager()
+        if (gps == null) DiagLog.log(app, "카카오 GPS 관리자 없음") else gps.requestUpdate(this)
         shared.startWithTrip(null, KNRoutePriority.KNRoutePriority_Recommand, KNRouteAvoidOption.KNRouteAvoidOption_None.value)
         DiagLog.log(app, "카카오 안전운행 모드 시작")
         guidance = shared
