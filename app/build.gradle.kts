@@ -16,6 +16,10 @@ android {
         targetSdk = 35
         versionCode = runNumber
         versionName = "0.1.$runNumber"
+        // 카카오 SDK 네이티브 라이브러리 중 폰용(arm)만 포함해 APK 크기를 줄임
+        ndk {
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+        }
         // GitHub Secrets의 KAKAO_NATIVE_APP_KEY. 없으면 빈 문자열로 빌드되고 카메라 정보 없이 동작
         buildConfigField("String", "KAKAO_APP_KEY", "\"${System.getenv("KAKAO_NATIVE_APP_KEY") ?: ""}\"")
     }
