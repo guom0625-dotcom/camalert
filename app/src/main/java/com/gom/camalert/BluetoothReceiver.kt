@@ -19,6 +19,8 @@ class BluetoothReceiver : BroadcastReceiver() {
         val address = device?.address ?: return
         if (address !in Prefs(context).carAddresses) return
 
+        val connected = intent.action == BluetoothDevice.ACTION_ACL_CONNECTED
+        DiagLog.log(context, "차량 Bluetooth ${if (connected) "연결" else "끊김"} (${address.takeLast(5)})")
         when (intent.action) {
             BluetoothDevice.ACTION_ACL_CONNECTED -> AlertService.start(context)
             BluetoothDevice.ACTION_ACL_DISCONNECTED -> AlertService.stop(context, silent = true)

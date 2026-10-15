@@ -130,7 +130,9 @@ object Updater {
         val app = context.applicationContext
         Thread {
             val release = findNewer(app) ?: return@Thread
-            install(app, release)
+            DiagLog.log(app, "자동 업데이트: ${release.versionName} 내려받기 시작")
+            val ok = install(app, release)
+            DiagLog.log(app, "자동 업데이트: ${if (ok) "설치 요청됨" else "실패"}")
         }.start()
     }
 
@@ -145,7 +147,9 @@ object Updater {
         override fun onReceive(context: Context, intent: Intent) {
             val status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)
             if (status != PackageInstaller.STATUS_PENDING_USER_ACTION) {
-                Log.i(TAG, "install status=$status ${intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE)}")
+                val message = intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE)
+                Log.i(TAG, "install status=$status $message")
+                if (status != PackageInstaller.STATUS_SUCCESS) DiagLog.log(context, "업데이트 설치 실패: status=$status $message")
                 return
             }
             // 처음 한 번은 사용자 확인이 필요함

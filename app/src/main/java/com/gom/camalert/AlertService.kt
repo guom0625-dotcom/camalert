@@ -28,6 +28,7 @@ class AlertService : Service(), LocationListener {
     private lateinit var source: CameraSource
     private var running = false
     private var paused = false
+    private var lastLocationLog = 0L
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -40,8 +41,13 @@ class AlertService : Service(), LocationListener {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            ACTION_EXIT -> shutdown(sound = intent?.getBooleanExtra(EXTRA_SILENT, false) != true)
+            ACTION_EXIT -> {
+                val silent = intent?.getBooleanExtra(EXTRA_SILENT, false) == true
+                DiagLog.log(this, if (silent) "서비스 종료 (차량 연결 끊김)" else "서비스 종료 (사용자)")
+                shutdown(sound = !silent)
+            }
             ACTION_PAUSE -> if (running) {
+                DiagLog.log(this, "멈춤")
                 paused = true
                 source.muted = true
                 chime.stop()
@@ -56,7 +62,10 @@ class AlertService : Service(), LocationListener {
                     // startForegroundService로 다시 불렸으면 매번 startForeground를 호출해야 함
                     startForeground(NOTIFICATION_ID, buildNotification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
                 }
-                if (paused) chime.start()
+                if (paused) {
+                    DiagLog.log(this, "재개")
+                    chime.start()
+                }
                 paused = false
                 source.muted = false
                 refreshNotification()
@@ -71,7 +80,16 @@ class AlertService : Service(), LocationListener {
         super.onDestroy()
     }
 
-    override fun onLocationChanged(location: Location) = source.onLocation(location)
+    override fun onLocationChanged(location: Location) {
+        source.onLocation(location)
+        // GPS가 살아 있는지 확인용으로 1분에 한 번만 기록
+        val now = System.currentTimeMillis()
+        if (now - lastLocationLog >= 60_000) {
+            lastLocationLog = now
+            val speed = if (location.hasSpeed()) "${(location.speed * 3.6f).toInt()}km/h" else "속도 없음"
+            DiagLog.log(this, "GPS 수신 중 · $speed · 정확도 ${location.accuracy.toInt()}m")
+        }
+    }
 
     private fun begin(): Boolean {
         try {
@@ -79,20 +97,27 @@ class AlertService : Service(), LocationListener {
         } catch (e: Exception) {
             // 권한 부족이나 백그라운드 시작 제한
             Log.w(TAG, "startForeground failed", e)
+            DiagLog.log(this, "서비스 시작 실패: ${e.javaClass.simpleName} ${e.message}")
             stopSelf()
             return false
         }
         running = true
+        DiagLog.log(this, "서비스 시작 · 버전 ${packageManager.getPackageInfo(packageName, 0).versionName}")
         startTracking()
         chime.start()
         return true
     }
 
     private fun startTracking() {
-        source.start(onStatus = ::refreshNotification)
+        source.start(onStatus = {
+            DiagLog.log(this, "상태: ${source.status}")
+            refreshNotification()
+        })
         if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
             getSystemService(LocationManager::class.java)
                 .requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 0f, this, Looper.getMainLooper())
+        } else {
+            DiagLog.log(this, "위치 권한 없음: 과속 경고 기준(5%/10%) 판단 불가")
         }
     }
 
@@ -167,6 +192,7 @@ class AlertService : Service(), LocationListener {
             } catch (e: Exception) {
                 // Android 12+ 백그라운드 시작이 막힌 경우: 누르면 시작되는 알림으로 대신함
                 Log.w(TAG, "background start blocked", e)
+                DiagLog.log(context, "백그라운드 시작 차단됨 (${e.javaClass.simpleName}) → '눌러서 시작' 알림 표시")
                 showTapToStart(context)
             }
         }

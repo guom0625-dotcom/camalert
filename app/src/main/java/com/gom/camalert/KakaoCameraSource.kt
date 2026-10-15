@@ -78,6 +78,7 @@ class KakaoCameraSource(private val app: Application) : CameraSource, KNGuidance
     }
 
     private fun initialize() {
+        DiagLog.log(app, "카카오 SDK 초기화 시작")
         setStatus("카카오내비 인증 중…")
         KNSDK.initializeWithAppKey(
             BuildConfig.KAKAO_APP_KEY,
@@ -89,6 +90,7 @@ class KakaoCameraSource(private val app: Application) : CameraSource, KNGuidance
             main.post {
                 if (error != null) {
                     Log.w(TAG, "KNSDK init failed: ${error.code} ${error.msg}")
+                    DiagLog.log(app, "카카오 인증 실패: code=${error.code} msg=${error.msg} tag=${error.tagMsg}")
                     setStatus("카카오내비 인증 실패 (${error.code}) ${error.msg}")
                 } else {
                     startGuidance()
@@ -109,13 +111,22 @@ class KakaoCameraSource(private val app: Application) : CameraSource, KNGuidance
         shared.safetyFreqModeHighWay = KNGuideFrequencyMode.KNGuideFrequencyMode_Always
         shared.voiceGuideDelegate = this
         shared.startWithoutTrip()
+        DiagLog.log(app, "카카오 안전운행 모드 시작")
         guidance = shared
         setStatus("전방 카메라 감시 중 (카카오내비)")
     }
 
     override fun shouldPlayVoiceGuide(guidance: KNGuidance, voiceGuide: KNGuide_Voice, newData: MutableList<ByteArray>): Boolean {
-        if (!active || muted) return false
         val safety = voiceGuide.guideObj as? KNSafety
+        val what = "${voiceGuide.voiceCode.name.removePrefix("KNVoiceCode_")}/${safety?.code?.name?.removePrefix("KNSafetyCode_") ?: "-"}" +
+            " 단계=${voiceGuide.voiceDist?.name?.removePrefix("KNVoiceDist_")}" +
+            ((safety as? KNSafety_Camera)?.speedLimit?.takeIf { it > 0 }?.let { " 제한=$it" } ?: "") +
+            (speedKmh?.let { " 속도=${it.toInt()}" } ?: "") +
+            (distanceTo(guidance, safety)?.let { " 거리=${it}m" } ?: "")
+        if (!active || muted) {
+            DiagLog.log(app, "안내 무시 (${if (muted) "멈춤 중" else "비활성"}): $what")
+            return false
+        }
         val play = when (voiceGuide.voiceCode.name) {
             "KNVoiceCode_Safety" -> safety != null && allowed(guidance, safety)
             "KNVoiceCode_SchoolZone" -> prefs.isOn(GuidanceItem.CHILD_ZONE)
@@ -134,11 +145,13 @@ class KakaoCameraSource(private val app: Application) : CameraSource, KNGuidance
             voiceGuide.setVolume(prefs.volume.coerceIn(0, 100) / 100f)
             voiceGuide.setAudioAttribute(attributes)
         }
+        DiagLog.log(app, (if (play) "안내 재생: " else "안내 거름 (${filterReason(guidance, voiceGuide, safety)}): ") + what)
         return play
     }
 
     override fun willPlayVoiceGuide(guidance: KNGuidance, voiceGuide: KNGuide_Voice) {
-        audio.requestAudioFocus(focus)
+        val granted = audio.requestAudioFocus(focus) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+        if (!granted) DiagLog.log(app, "오디오 포커스 거부됨 (다른 앱이 소리를 점유 중)")
     }
 
     override fun didFinishPlayVoiceGuide(guidance: KNGuidance, voiceGuide: KNGuide_Voice) {
@@ -149,15 +162,40 @@ class KakaoCameraSource(private val app: Application) : CameraSource, KNGuidance
     private fun allowed(guidance: KNGuidance, safety: KNSafety): Boolean {
         val item = GuidanceItem.of(safety.code.name) ?: return false
         if (!prefs.isOn(item)) return false
-
-        val here = guidance.locationGuide?.let { it.location ?: it.locationForPrimaryRoute } ?: return true
-        if (safety.location.route != here.route) return true
-        val distance = safety.location.distFromS - here.distFromS
-        val highway = here.roadType?.name == "KNRoadType_Highway"
-        val limit = if (highway) prefs.highwayDistance else prefs.localDistance
+        val distance = distanceTo(guidance, safety) ?: return true
         // 안내 지점이 기준 거리보다 약간 앞서 나오는 경우를 감안해 여유를 둠
-        return distance <= limit + DISTANCE_MARGIN
+        return distance <= startDistance(guidance) + DISTANCE_MARGIN
     }
+
+    /** 경로상 남은 거리(m). 같은 경로 위에 있지 않으면 null */
+    private fun distanceTo(guidance: KNGuidance, safety: KNSafety?): Int? {
+        safety ?: return null
+        val here = guidance.locationGuide?.let { it.location ?: it.locationForPrimaryRoute } ?: return null
+        if (safety.location.route != here.route) return null
+        return safety.location.distFromS - here.distFromS
+    }
+
+    private fun startDistance(guidance: KNGuidance): Int {
+        val here = guidance.locationGuide?.let { it.location ?: it.locationForPrimaryRoute }
+        return if (here?.roadType?.name == "KNRoadType_Highway") prefs.highwayDistance else prefs.localDistance
+    }
+
+    /** 진단 기록용: 왜 걸렀는지 */
+    private fun filterReason(guidance: KNGuidance, voiceGuide: KNGuide_Voice, safety: KNSafety?): String =
+        when (voiceGuide.voiceCode.name) {
+            "KNVoiceCode_Safety" -> {
+                val item = safety?.let { GuidanceItem.of(it.code.name) }
+                when {
+                    safety == null -> "대상 정보 없음"
+                    item == null -> "안내하지 않는 종류"
+                    !prefs.isOn(item) -> "'${item.label}' 꺼짐"
+                    else -> "안내 시작 거리 ${startDistance(guidance)}m 밖"
+                }
+            }
+            "KNVoiceCode_SchoolZone" -> "'어린이 보호구역' 꺼짐"
+            "KNVoiceCode_Alert", "KNVoiceCode_Alram" -> "과속 경고 설정 (모드=${prefs.overspeedMode}, 기준=${prefs.overspeedPercent}%)"
+            else -> "길 안내 음성"
+        }
 
     private fun setStatus(text: String) {
         status = text

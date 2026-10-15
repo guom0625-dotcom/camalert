@@ -106,6 +106,8 @@ class SettingsActivity : Activity() {
                 }
             })
             addView(guidance)
+            addView(heading("진단 기록"))
+            addView(diagnostics())
             addView(heading("업데이트"))
             addView(updateStatus)
             addView(updateButton, buttonParams())
@@ -397,6 +399,44 @@ class SettingsActivity : Activity() {
                 })
             }
         }
+
+    private fun diagnostics(): LinearLayout {
+        val prefs = Prefs(this)
+        val box = vertical()
+        val info = caption("")
+        fun refreshInfo() {
+            val kb = DiagLog.sizeBytes(this) / 1024
+            info.text = if (prefs.diagEnabled) "기록 중 · ${kb}KB (폰 안에만 저장, 외부 전송 없음)" else "꺼짐 · ${kb}KB"
+        }
+        box.addView(CheckBox(this).apply {
+            text = "진단 기록 남기기"
+            isChecked = prefs.diagEnabled
+            setPadding(dp(8), dp(6), 0, dp(6))
+            setOnCheckedChangeListener { _, checked ->
+                prefs.diagEnabled = checked
+                refreshInfo()
+            }
+        })
+        box.addView(info)
+        val buttons = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        buttons.addView(button("기록 복사") {
+            val text = DiagLog.recent(this)
+            if (text.isBlank()) {
+                android.widget.Toast.makeText(this, "기록이 없습니다", android.widget.Toast.LENGTH_SHORT).show()
+            } else {
+                val clipboard = getSystemService(android.content.ClipboardManager::class.java)
+                clipboard.setPrimaryClip(android.content.ClipData.newPlainText("camalert 진단 기록", text))
+                android.widget.Toast.makeText(this, "복사했습니다. 채팅에 붙여 넣어 주세요", android.widget.Toast.LENGTH_SHORT).show()
+            }
+        }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = dp(8) })
+        buttons.addView(button("기록 지우기") {
+            DiagLog.clear(this)
+            info.postDelayed({ refreshInfo() }, 300)
+        }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        box.addView(buttons)
+        refreshInfo()
+        return box
+    }
 
     private fun checkForUpdate() {
         val current = Updater.currentVersionCode(this)

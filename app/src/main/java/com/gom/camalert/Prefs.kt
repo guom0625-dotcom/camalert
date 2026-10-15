@@ -24,6 +24,11 @@ class Prefs(context: Context) {
     /** 카카오 음성 크기 0~100 */
     var volume by intPref("volume", 100)
 
+    /** 진단 기록 남기기 (테스트 기간이라 기본 켬) */
+    var diagEnabled: Boolean
+        get() = prefs.getBoolean("diag_enabled", true)
+        set(value) = prefs.edit().putBoolean("diag_enabled", value).apply()
+
     private fun intPref(key: String, default: Int) = object : kotlin.properties.ReadWriteProperty<Any?, Int> {
         override fun getValue(thisRef: Any?, property: kotlin.reflect.KProperty<*>) = prefs.getInt(key, default)
         override fun setValue(thisRef: Any?, property: kotlin.reflect.KProperty<*>, value: Int) =
