@@ -317,7 +317,7 @@ class SettingsActivity : Activity() {
             addView(choices(thresholds, prefs.overspeedPercent) { prefs.overspeedPercent = it; changed() })
         })
 
-        section("음량", { "${prefs.volume}%" }, vertical().apply {
+        section("음량", { "${prefs.volume}%" + if (prefs.duckOthers) " · 다른 소리 줄임" else "" }, vertical().apply {
             addView(SeekBar(this@SettingsActivity).apply {
                 max = 100
                 progress = prefs.volume
@@ -330,6 +330,15 @@ class SettingsActivity : Activity() {
                     override fun onStartTrackingTouch(bar: SeekBar) {}
                     override fun onStopTrackingTouch(bar: SeekBar) {}
                 })
+            })
+            addView(CheckBox(this@SettingsActivity).apply {
+                text = "안내 중 다른 소리 줄이기 (음악 등)"
+                isChecked = prefs.duckOthers
+                setPadding(dp(8), dp(6), 0, dp(6))
+                setOnCheckedChangeListener { _, checked ->
+                    prefs.duckOthers = checked
+                    changed()
+                }
             })
         })
 

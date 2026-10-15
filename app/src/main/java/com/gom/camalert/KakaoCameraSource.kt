@@ -150,6 +150,7 @@ class KakaoCameraSource(private val app: Application) : CameraSource, KNGuidance
     }
 
     override fun willPlayVoiceGuide(guidance: KNGuidance, voiceGuide: KNGuide_Voice) {
+        if (!prefs.duckOthers) return
         val granted = audio.requestAudioFocus(focus) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
         if (!granted) DiagLog.log(app, "오디오 포커스 거부됨 (다른 앱이 소리를 점유 중)")
     }

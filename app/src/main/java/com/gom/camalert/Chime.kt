@@ -15,6 +15,8 @@ import kotlin.math.sin
 /** 시작/재개는 올라가는 두 음, 멈춤/종료는 내려가는 두 음 */
 class Chime(context: Context) {
 
+    private val prefs = Prefs(context)
+
     private val audio = context.getSystemService(AudioManager::class.java)
     private val attributes = AudioAttributes.Builder()
         .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
@@ -43,12 +45,13 @@ class Chime(context: Context) {
             .setBufferSizeInBytes(pcm.size * 2)
             .build()
         track.write(pcm, 0, pcm.size)
-        audio.requestAudioFocus(focus)
+        val duck = prefs.duckOthers
+        if (duck) audio.requestAudioFocus(focus)
         track.play()
         val durationMs = pcm.size * 1000L / SAMPLE_RATE
         main.postDelayed({
             track.release()
-            audio.abandonAudioFocusRequest(focus)
+            if (duck) audio.abandonAudioFocusRequest(focus)
         }, durationMs + 100)
     }
 

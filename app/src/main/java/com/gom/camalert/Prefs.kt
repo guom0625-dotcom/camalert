@@ -24,6 +24,11 @@ class Prefs(context: Context) {
     /** 카카오 음성 크기 0~100 */
     var volume by intPref("volume", 100)
 
+    /** 안내가 나오는 동안 음악 등 다른 앱 소리를 잠깐 줄일지 */
+    var duckOthers: Boolean
+        get() = prefs.getBoolean("duck_others", true)
+        set(value) = prefs.edit().putBoolean("duck_others", value).apply()
+
     /** 진단 기록 남기기 (테스트 기간이라 기본 켬) */
     var diagEnabled: Boolean
         get() = prefs.getBoolean("diag_enabled", true)
