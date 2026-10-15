@@ -14,6 +14,7 @@ import org.json.JSONObject
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * GitHub Releases에서 새 버전을 받아 설치한다.
@@ -32,6 +33,10 @@ object Updater {
 
     /** 화면이 떠 있으면 설치 확인 창을 바로 띄우고, 아니면 알림으로 */
     @Volatile var foreground = false
+
+    /** 내려받기/설치가 동시에 두 번 돌지 않게 */
+    private val busy = AtomicBoolean(false)
+    val installing get() = busy.get()
 
     fun currentVersionCode(context: Context): Long =
         context.packageManager.getPackageInfo(context.packageName, 0).longVersionCode
@@ -52,12 +57,16 @@ object Updater {
         null
     }
 
-    /** 블로킹 호출. 내려받아 설치 세션을 커밋한다. */
-    fun install(context: Context, release: Release): Boolean {
+    /**
+     * 블로킹 호출. 내려받아 설치 세션을 커밋한다.
+     * onProgress(받은 바이트, 전체 바이트). 전체 크기를 모르면 -1.
+     */
+    fun install(context: Context, release: Release, onProgress: (Long, Long) -> Unit = { _, _ -> }): Boolean {
         if (!context.packageManager.canRequestPackageInstalls()) return false
+        if (!busy.compareAndSet(false, true)) return false
         return try {
             val apk = File(context.cacheDir, "update.apk")
-            get(release.apkUrl).use { input -> apk.outputStream().use { input.copyTo(it) } }
+            download(release.apkUrl, apk, onProgress)
 
             val installer = context.packageManager.packageInstaller
             val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL)
@@ -85,6 +94,34 @@ object Updater {
         } catch (e: Exception) {
             Log.w(TAG, "update install failed", e)
             false
+        } finally {
+            busy.set(false)
+        }
+    }
+
+    private fun download(url: String, target: File, onProgress: (Long, Long) -> Unit) {
+        val connection = URL(url).openConnection() as HttpURLConnection
+        connection.connectTimeout = 15_000
+        connection.readTimeout = 30_000
+        val total = connection.contentLengthLong
+        var received = 0L
+        var lastReported = -1L
+        connection.inputStream.use { input ->
+            target.outputStream().use { output ->
+                val buffer = ByteArray(64 * 1024)
+                while (true) {
+                    val n = input.read(buffer)
+                    if (n < 0) break
+                    output.write(buffer, 0, n)
+                    received += n
+                    // 1%마다만 알림 (UI 갱신 과다 방지)
+                    val step = if (total > 0) received * 100 / total else received / (512 * 1024)
+                    if (step != lastReported) {
+                        lastReported = step
+                        onProgress(received, total)
+                    }
+                }
+            }
         }
     }
 

@@ -44,6 +44,8 @@ class SettingsActivity : Activity() {
     }
     private var editingDevices = false
     private var pendingRelease: Updater.Release? = null
+    // 확인 창에서 취소했을 때 화면에 돌아올 때마다 다시 받지 않도록, 자동 설치는 버전당 한 번만
+    private var autoTriedVersion: Int? = null
     private var missingPermissions = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -51,7 +53,7 @@ class SettingsActivity : Activity() {
         permissionList = vertical()
         deviceList = vertical()
         updateStatus = caption("")
-        updateButton = button("업데이트 확인") { onUpdateClicked() }
+        updateButton = button("업데이트") { onUpdateClicked() }.apply { visibility = View.GONE }
         statusView = TextView(this).apply {
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
         }
@@ -385,38 +387,71 @@ class SettingsActivity : Activity() {
 
     private fun checkForUpdate() {
         val current = Updater.currentVersionCode(this)
-        updateStatus.text = "현재 버전 0.1.$current"
+        if (Updater.installing) return
+        updateStatus.text = "현재 버전 0.1.$current · 새 버전 확인 중…"
+        updateButton.visibility = View.GONE
         Thread {
             val release = Updater.findNewer(this)
             runOnUiThread {
                 pendingRelease = release
-                if (release != null) {
-                    updateStatus.text = "현재 버전 0.1.$current → 새 버전 ${release.versionName}"
-                    updateButton.text = "지금 업데이트"
-                } else {
-                    updateButton.text = "업데이트 확인"
+                when {
+                    release == null -> updateStatus.text = "최신 버전입니다 (0.1.$current)"
+                    !packageManager.canRequestPackageInstalls() -> {
+                        updateStatus.text = "새 버전 ${release.versionName}이 있습니다. 앱 설치를 허용하면 자동으로 업데이트합니다."
+                        showUpdateButton("설치 허용")
+                    }
+                    // 운전 중에는 설치하면 앱이 재시작되므로 끝난 뒤에 자동 설치
+                    AlertService.statusLine != null -> {
+                        updateStatus.text = "새 버전 ${release.versionName}이 있습니다. 카메라 알림이 꺼지면 자동으로 설치합니다."
+                        showUpdateButton("지금 업데이트")
+                    }
+                    autoTriedVersion == release.versionCode -> {
+                        updateStatus.text = "새 버전 ${release.versionName}이 있습니다."
+                        showUpdateButton("지금 업데이트")
+                    }
+                    else -> {
+                        autoTriedVersion = release.versionCode
+                        startInstall(release)
+                    }
                 }
             }
         }.start()
     }
 
+    private fun showUpdateButton(label: String) {
+        updateButton.text = label
+        updateButton.visibility = View.VISIBLE
+    }
+
     private fun onUpdateClicked() {
-        val release = pendingRelease
-        if (release == null) {
-            checkForUpdate()
-            return
-        }
+        val release = pendingRelease ?: return checkForUpdate()
         if (!packageManager.canRequestPackageInstalls()) {
             startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")))
             return
         }
-        updateButton.isEnabled = false
-        updateStatus.text = "내려받는 중…"
+        startInstall(release)
+    }
+
+    private fun startInstall(release: Updater.Release) {
+        updateButton.visibility = View.GONE
+        updateStatus.text = "새 버전 ${release.versionName} 내려받는 중…"
         Thread {
-            val ok = Updater.install(this, release)
+            val ok = Updater.install(this, release) { received, total ->
+                val mb = { bytes: Long -> "%.1f".format(bytes / 1_048_576.0) }
+                val text = if (total > 0) {
+                    "새 버전 ${release.versionName} 내려받는 중… ${received * 100 / total}% (${mb(received)}/${mb(total)}MB)"
+                } else {
+                    "새 버전 ${release.versionName} 내려받는 중… ${mb(received)}MB"
+                }
+                runOnUiThread { updateStatus.text = text }
+            }
             runOnUiThread {
-                updateButton.isEnabled = true
-                updateStatus.text = if (ok) "설치 중… 잠시 후 앱이 다시 시작됩니다" else "업데이트 실패. 잠시 후 다시 시도하세요"
+                if (ok) {
+                    updateStatus.text = "설치 중… 잠시 후 앱이 다시 시작됩니다"
+                } else {
+                    updateStatus.text = "업데이트 실패. 네트워크를 확인하고 다시 시도하세요"
+                    showUpdateButton("다시 시도")
+                }
             }
         }.start()
     }
