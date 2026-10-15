@@ -29,6 +29,11 @@ class Prefs(context: Context) {
         get() = prefs.getBoolean("duck_others", true)
         set(value) = prefs.edit().putBoolean("duck_others", value).apply()
 
+    /** 내비 앱이 길안내 중이면 자동으로 멈춤 */
+    var navAutoPause: Boolean
+        get() = prefs.getBoolean("nav_auto_pause", true)
+        set(value) = prefs.edit().putBoolean("nav_auto_pause", value).apply()
+
     /** 진단 기록 남기기 (테스트 기간이라 기본 켬) */
     var diagEnabled: Boolean
         get() = prefs.getBoolean("diag_enabled", true)

@@ -174,6 +174,20 @@ class SettingsActivity : Activity() {
             val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$packageName"))
             startActivity(intent)
         }
+        if (Prefs(this).navAutoPause) {
+            // 일부 기기에선 직접 설치한 앱의 알림 접근이 '제한된 설정'으로 막혀 있음
+            permissionRow("알림 접근 (내비 실행 감지)", NavWatcher.hasAccess(this)) {
+                val intent = if (Build.VERSION.SDK_INT >= 30) {
+                    Intent(Settings.ACTION_NOTIFICATION_LISTENER_DETAIL_SETTINGS).putExtra(
+                        Settings.EXTRA_NOTIFICATION_LISTENER_COMPONENT_NAME,
+                        android.content.ComponentName(this, NavWatcher::class.java).flattenToString(),
+                    )
+                } else {
+                    Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
+                }
+                startActivity(intent)
+            }
+        }
         if (missingPermissions == 0) {
             // 다 허용됐으면 목록 대신 한 줄로
             permissionList.removeAllViews()
@@ -345,6 +359,21 @@ class SettingsActivity : Activity() {
                     changed()
                 }
             })
+        })
+
+        section("내비 앱 실행 시", { if (prefs.navAutoPause) "자동 멈춤" else "계속 안내" }, vertical().apply {
+            addView(CheckBox(this@SettingsActivity).apply {
+                text = "내비 길안내 중엔 자동으로 멈춤"
+                isChecked = prefs.navAutoPause
+                setPadding(dp(8), dp(6), 0, dp(6))
+                setOnCheckedChangeListener { _, checked ->
+                    prefs.navAutoPause = checked
+                    NavWatcher.listener?.invoke()
+                    refreshPermissions()
+                    changed()
+                }
+            })
+            addView(caption("TMAP, 네이버 지도, 카카오내비, 카카오맵이 길안내 중이면 소리 없이 멈추고, 끝나면 다시 켭니다. '알림 접근' 권한이 필요합니다."))
         })
 
         for (group in listOf(GuidanceGroup.ENFORCEMENT, GuidanceGroup.HAZARD, GuidanceGroup.INFO)) {

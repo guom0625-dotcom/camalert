@@ -43,6 +43,17 @@
             </intent-filter>
         </receiver>
 
+        <!-- 내비 앱 길안내 감지용 (알림 접근 권한) -->
+        <service
+            android:name=".NavWatcher"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
         <receiver
             android:name=".Updater$InstallResultReceiver"
             android:exported="false" />

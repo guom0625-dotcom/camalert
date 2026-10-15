@@ -28,6 +28,12 @@ class AlertService : Service(), LocationListener {
     private lateinit var source: CameraSource
     private var running = false
     private var paused = false
+    /** 길안내 중인 내비 앱 (자동 멈춤 원인). 없으면 null */
+    private var navApp: String? = null
+    /** 내비 실행 중인데도 사용자가 ▶ 시작을 누른 경우 */
+    private var navOverride = false
+    private val navPaused get() = navApp != null && !navOverride
+    private val muted get() = paused || navPaused
     private var lastLocationLog = 0L
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -50,24 +56,29 @@ class AlertService : Service(), LocationListener {
                 DiagLog.log(this, "멈춤")
                 paused = true
                 source.muted = true
-                chime.stop()
+                if (!navPaused) chime.stop()
                 refreshNotification()
             } else {
                 stopSelf()
             }
             else -> {
+                val wasMuted = running && muted
                 if (!running) {
                     if (!begin()) return START_NOT_STICKY
                 } else if (intent?.action == ACTION_START) {
                     // startForegroundService로 다시 불렸으면 매번 startForeground를 호출해야 함
                     startForeground(NOTIFICATION_ID, buildNotification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
                 }
-                if (paused) {
+                if (intent?.action == ACTION_RESUME && navPaused) {
+                    DiagLog.log(this, "내비 실행 중이지만 사용자가 시작")
+                    navOverride = true
+                }
+                paused = false
+                if (wasMuted && !muted) {
                     DiagLog.log(this, "재개")
                     chime.start()
                 }
-                paused = false
-                source.muted = false
+                source.muted = muted
                 refreshNotification()
             }
         }
@@ -76,6 +87,7 @@ class AlertService : Service(), LocationListener {
 
     override fun onDestroy() {
         statusLine = null
+        NavWatcher.listener = null
         if (running) stopTracking()
         super.onDestroy()
     }
@@ -105,7 +117,21 @@ class AlertService : Service(), LocationListener {
         DiagLog.log(this, "서비스 시작 · 버전 ${packageManager.getPackageInfo(packageName, 0).versionName}")
         startTracking()
         chime.start()
+        NavWatcher.listener = { onNavChanged() }
+        onNavChanged()
         return true
+    }
+
+    /** 내비 길안내가 시작/끝나면 소리 없이 멈추고 다시 켬 (내비 소리와 겹치지 않게) */
+    private fun onNavChanged() {
+        if (!running) return
+        val app = if (Prefs(this).navAutoPause) NavWatcher.active else null
+        if (app == navApp) return
+        navApp = app
+        if (app == null) navOverride = false
+        DiagLog.log(this, if (app != null) "자동 멈춤: $app 길안내 중" else "자동 재개: 내비 길안내 끝남")
+        source.muted = muted
+        refreshNotification()
     }
 
     private fun startTracking() {
@@ -130,6 +156,7 @@ class AlertService : Service(), LocationListener {
         if (running) stopTracking()
         running = false
         statusLine = null
+        NavWatcher.listener = null
         if (sound) chime.stop()
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
@@ -142,9 +169,14 @@ class AlertService : Service(), LocationListener {
     }
 
     private fun buildNotification(): Notification {
-        val title = if (paused) "카메라 알림 멈춤" else "카메라 알림 실행 중"
-        statusLine = "$title\n${source.status}"
-        val toggle = if (paused) {
+        val title = when {
+            paused -> "카메라 알림 멈춤"
+            navPaused -> "카메라 알림 쉬는 중 · $navApp 길안내 중"
+            else -> "카메라 알림 실행 중"
+        }
+        val text = if (navPaused && !paused) "내비를 끄면 자동으로 다시 켜집니다" else source.status
+        statusLine = "$title\n$text"
+        val toggle = if (muted) {
             action(android.R.drawable.ic_media_play, "▶ 시작", servicePending(this, ACTION_RESUME))
         } else {
             action(android.R.drawable.ic_media_pause, "⏸ 멈춤", servicePending(this, ACTION_PAUSE))
@@ -152,7 +184,7 @@ class AlertService : Service(), LocationListener {
         return Notification.Builder(this, CHANNEL_RUNNING)
             .setSmallIcon(R.drawable.ic_stat_dog)
             .setContentTitle(title)
-            .setContentText(source.status)
+            .setContentText(text)
             .setContentIntent(settingsPending(this))
             .setOngoing(true)
             .setForegroundServiceBehavior(Notification.FOREGROUND_SERVICE_IMMEDIATE)
