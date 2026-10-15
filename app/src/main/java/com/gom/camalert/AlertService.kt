@@ -24,7 +24,7 @@ import android.util.Log
  */
 class AlertService : Service(), LocationListener {
 
-    private lateinit var voice: Voice
+    private lateinit var chime: Chime
     private lateinit var source: CameraSource
     private var running = false
     private var paused = false
@@ -33,18 +33,18 @@ class AlertService : Service(), LocationListener {
 
     override fun onCreate() {
         super.onCreate()
-        voice = Voice(this)
+        chime = Chime(this)
         source = if (KakaoCameraSource.available) KakaoCameraSource(application) else NoCameraSource()
         createChannels(this)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            ACTION_EXIT -> shutdown()
+            ACTION_EXIT -> shutdown(sound = intent?.getBooleanExtra(EXTRA_SILENT, false) != true)
             ACTION_PAUSE -> if (running) {
                 paused = true
                 source.muted = true
-                voice.stop()
+                chime.stop()
                 refreshNotification()
             } else {
                 stopSelf()
@@ -56,7 +56,7 @@ class AlertService : Service(), LocationListener {
                     // startForegroundService로 다시 불렸으면 매번 startForeground를 호출해야 함
                     startForeground(NOTIFICATION_ID, buildNotification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
                 }
-                if (paused) voice.say("카메라 알림을 다시 시작합니다")
+                if (paused) chime.start()
                 paused = false
                 source.muted = false
                 refreshNotification()
@@ -68,7 +68,6 @@ class AlertService : Service(), LocationListener {
     override fun onDestroy() {
         statusLine = null
         if (running) stopTracking()
-        voice.shutdown()
         super.onDestroy()
     }
 
@@ -85,7 +84,7 @@ class AlertService : Service(), LocationListener {
         }
         running = true
         startTracking()
-        voice.say("카메라 알림을 시작합니다")
+        chime.start()
         return true
     }
 
@@ -102,11 +101,11 @@ class AlertService : Service(), LocationListener {
         source.stop()
     }
 
-    private fun shutdown() {
+    private fun shutdown(sound: Boolean) {
         if (running) stopTracking()
         running = false
         statusLine = null
-        voice.stop()
+        if (sound) chime.stop()
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
         // 운전이 끝난 뒤에만 업데이트 (설치하면 앱이 재시작됨)
@@ -158,6 +157,7 @@ class AlertService : Service(), LocationListener {
         const val ACTION_RESUME = "com.gom.camalert.RESUME"
         const val ACTION_PAUSE = "com.gom.camalert.PAUSE"
         const val ACTION_EXIT = "com.gom.camalert.EXIT"
+        private const val EXTRA_SILENT = "silent"
 
         fun start(context: Context) {
             val intent = Intent(context, AlertService::class.java).setAction(ACTION_START)
@@ -171,10 +171,13 @@ class AlertService : Service(), LocationListener {
             }
         }
 
-        fun stop(context: Context) {
+        /** silent: 차에서 내려 Bluetooth가 끊긴 경우엔 폰 스피커로 소리가 나지 않게 */
+        fun stop(context: Context, silent: Boolean = false) {
             context.getSystemService(NotificationManager::class.java).cancel(CONNECTED_NOTIFICATION_ID)
             try {
-                context.startService(Intent(context, AlertService::class.java).setAction(ACTION_EXIT))
+                context.startService(
+                    Intent(context, AlertService::class.java).setAction(ACTION_EXIT).putExtra(EXTRA_SILENT, silent)
+                )
             } catch (e: Exception) {
                 // 서비스가 이미 없으면 백그라운드 startService가 거부됨. 끌 것도 없음.
                 Log.d(TAG, "stop ignored", e)

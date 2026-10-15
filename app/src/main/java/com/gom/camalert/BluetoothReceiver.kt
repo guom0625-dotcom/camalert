@@ -21,7 +21,7 @@ class BluetoothReceiver : BroadcastReceiver() {
 
         when (intent.action) {
             BluetoothDevice.ACTION_ACL_CONNECTED -> AlertService.start(context)
-            BluetoothDevice.ACTION_ACL_DISCONNECTED -> AlertService.stop(context)
+            BluetoothDevice.ACTION_ACL_DISCONNECTED -> AlertService.stop(context, silent = true)
         }
     }
 }
