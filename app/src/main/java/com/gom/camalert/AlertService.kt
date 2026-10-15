@@ -111,6 +111,8 @@ class AlertService : Service(), LocationListener {
         voice.stop()
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
+        // 운전이 끝난 뒤에만 업데이트 (설치하면 앱이 재시작됨)
+        Updater.autoUpdate(this)
     }
 
     private fun refreshNotification() {

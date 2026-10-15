@@ -8,6 +8,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -42,3 +44,16 @@ jobs:
         with:
           name: camalert-${{ github.run_number }}
           path: app/build/outputs/apk/release/*.apk
+
+      # 앱의 자동 업데이트가 releases/latest의 camalert.apk를 받아감. 태그 끝 숫자 = versionCode
+      - name: Publish release
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NOTES: ${{ github.event.head_commit.message || 'manual build' }}
+        run: |
+          cp app/build/outputs/apk/release/app-release.apk camalert.apk
+          gh release create "v0.1.${{ github.run_number }}" camalert.apk \
+            --title "0.1.${{ github.run_number }}" \
+            --notes "$NOTES" \
+            --target "${{ github.sha }}"

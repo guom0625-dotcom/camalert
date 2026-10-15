@@ -26,13 +26,19 @@ class SettingsActivity : Activity() {
 
     private lateinit var permissionList: LinearLayout
     private lateinit var deviceList: LinearLayout
+    private lateinit var updateStatus: TextView
+    private lateinit var updateButton: Button
     private var voice: Voice? = null
+    private var editingDevices = false
+    private var pendingRelease: Updater.Release? = null
     private var missingPermissions = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         permissionList = vertical()
         deviceList = vertical()
+        updateStatus = caption("")
+        updateButton = button("업데이트 확인") { onUpdateClicked() }
 
         actionBar?.hide()
 
@@ -46,7 +52,6 @@ class SettingsActivity : Activity() {
             addView(heading("권한"))
             addView(permissionList)
             addView(heading("차량 Bluetooth"))
-            addView(caption("체크한 기기가 연결되면 자동으로 시작하고, 끊기면 종료합니다."))
             addView(deviceList)
             addView(heading("테스트"))
             addView(button("음성 테스트") {
@@ -54,6 +59,9 @@ class SettingsActivity : Activity() {
                 v.say("600미터 앞 신호 과속 카메라, 제한속도 60")
             }, buttonParams())
             addView(button("지금 시작") { AlertService.start(this@SettingsActivity) }, buttonParams())
+            addView(heading("업데이트"))
+            addView(updateStatus)
+            addView(updateButton, buttonParams())
         }
         val scroll = ScrollView(this).apply {
             clipToPadding = false
@@ -73,7 +81,14 @@ class SettingsActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        Updater.foreground = true
         refresh()
+        checkForUpdate()
+    }
+
+    override fun onPause() {
+        Updater.foreground = false
+        super.onPause()
     }
 
     override fun onDestroy() {
@@ -116,6 +131,9 @@ class SettingsActivity : Activity() {
                 requestPermissions(arrayOf(Manifest.permission.ACCESS_BACKGROUND_LOCATION), 4)
             }
         }
+        permissionRow("앱 설치 허용 (자동 업데이트)", packageManager.canRequestPackageInstalls()) {
+            startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")))
+        }
         val power = getSystemService(PowerManager::class.java)
         permissionRow("배터리 최적화 제외 (자동 시작에 필요)", power.isIgnoringBatteryOptimizations(packageName)) {
             @SuppressLint("BatteryLife")
@@ -146,16 +164,99 @@ class SettingsActivity : Activity() {
             return
         }
         val prefs = Prefs(this)
+        val selected = prefs.carAddresses
+
+        // 이미 골랐으면 목록 대신 선택된 차량만 보여줌
+        if (selected.isNotEmpty() && !editingDevices) {
+            val names = selected.map { address -> bonded.firstOrNull { it.address == address }?.name ?: address }
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                minimumHeight = dp(52)
+            }
+            row.addView(TextView(this).apply {
+                text = "🚗 " + names.sorted().joinToString(", ")
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+            }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            row.addView(Button(this).apply {
+                text = "변경"
+                minWidth = dp(72)
+                setOnClickListener {
+                    editingDevices = true
+                    refreshDevices()
+                }
+            })
+            deviceList.addView(row)
+            return
+        }
+
+        deviceList.addView(caption("체크한 기기가 연결되면 자동으로 시작하고, 끊기면 종료합니다."))
+        val items = vertical()
         for (device in bonded) {
-            deviceList.addView(CheckBox(this).apply {
+            items.addView(CheckBox(this).apply {
                 text = "${device.name ?: "(이름 없음)"}\n${device.address}"
-                isChecked = device.address in prefs.carAddresses
+                isChecked = device.address in selected
                 setPadding(dp(8), dp(8), 0, dp(8))
                 setOnCheckedChangeListener { _, checked ->
                     prefs.carAddresses = if (checked) prefs.carAddresses + device.address else prefs.carAddresses - device.address
+                    if (checked) {
+                        editingDevices = false
+                        refreshDevices()
+                    }
                 }
             })
         }
+        // 기기가 많으면 목록만 따로 스크롤
+        val list = ScrollView(this).apply {
+            isNestedScrollingEnabled = true
+            addView(items)
+        }
+        val height = if (bonded.size > 5) dp(320) else LinearLayout.LayoutParams.WRAP_CONTENT
+        deviceList.addView(list, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, height))
+        if (selected.isNotEmpty()) {
+            deviceList.addView(button("완료") {
+                editingDevices = false
+                refreshDevices()
+            }, buttonParams())
+        }
+    }
+
+    private fun checkForUpdate() {
+        val current = Updater.currentVersionCode(this)
+        updateStatus.text = "현재 버전 0.1.$current"
+        Thread {
+            val release = Updater.findNewer(this)
+            runOnUiThread {
+                pendingRelease = release
+                if (release != null) {
+                    updateStatus.text = "현재 버전 0.1.$current → 새 버전 ${release.versionName}"
+                    updateButton.text = "지금 업데이트"
+                } else {
+                    updateButton.text = "업데이트 확인"
+                }
+            }
+        }.start()
+    }
+
+    private fun onUpdateClicked() {
+        val release = pendingRelease
+        if (release == null) {
+            checkForUpdate()
+            return
+        }
+        if (!packageManager.canRequestPackageInstalls()) {
+            startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")))
+            return
+        }
+        updateButton.isEnabled = false
+        updateStatus.text = "내려받는 중…"
+        Thread {
+            val ok = Updater.install(this, release)
+            runOnUiThread {
+                updateButton.isEnabled = true
+                updateStatus.text = if (ok) "설치 중… 잠시 후 앱이 다시 시작됩니다" else "업데이트 실패. 잠시 후 다시 시도하세요"
+            }
+        }.start()
     }
 
     private fun permissionRow(label: String, ok: Boolean, onFix: () -> Unit) {
