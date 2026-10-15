@@ -38,7 +38,7 @@ class SettingsActivity : Activity() {
         override fun run() {
             val line = AlertService.statusLine
             statusView.text = line ?: "꺼짐\n차량 Bluetooth가 연결되면 자동으로 시작합니다"
-            startStopButton.text = if (line == null) "시작" else "종료"
+            startStopButton.text = if (line == null) "수동 시작" else "종료"
             handler.postDelayed(this, 1000)
         }
     }
@@ -90,9 +90,22 @@ class SettingsActivity : Activity() {
             addView(permissionList)
             addView(heading("차량 Bluetooth"))
             addView(deviceList)
-            addView(heading("안내 설정"))
-            addView(caption("항목을 누르면 펼쳐집니다. 바꾼 설정은 바로 적용됩니다."))
-            addView(guidanceSettings())
+            // 안내 설정 전체도 평소엔 접어 둠
+            val guidance = vertical().apply {
+                visibility = View.GONE
+                addView(caption("항목을 누르면 펼쳐집니다. 바꾼 설정은 바로 적용됩니다."))
+                addView(guidanceSettings())
+            }
+            addView(heading("안내 설정  ▼").apply {
+                isClickable = true
+                setBackgroundResource(android.R.drawable.list_selector_background)
+                setOnClickListener {
+                    val open = guidance.visibility != View.VISIBLE
+                    guidance.visibility = if (open) View.VISIBLE else View.GONE
+                    text = if (open) "안내 설정  ▲" else "안내 설정  ▼"
+                }
+            })
+            addView(guidance)
             addView(heading("업데이트"))
             addView(updateStatus)
             addView(updateButton, buttonParams())
