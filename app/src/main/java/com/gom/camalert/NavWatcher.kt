@@ -13,14 +13,31 @@ import android.service.notification.StatusBarNotification
  */
 class NavWatcher : NotificationListenerService() {
 
-    override fun onListenerConnected() = check()
+    override fun onListenerConnected() {
+        seen.clear()
+        DiagLog.log(this, "알림 접근 연결됨 (내비 감지 준비)")
+        check()
+    }
 
     override fun onListenerDisconnected() {
+        DiagLog.log(this, "알림 접근 끊김")
         update(this, null)
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
-        if (sbn.packageName in NAV_APPS) check()
+        if (sbn.packageName !in NAV_APPS) return
+        logFirstSeen(sbn)
+        check()
+    }
+
+    /**
+     * 진단용: 내비 앱이 어떤 알림을 띄우는지 종류별로 처음 한 번만 남김 (길안내 중엔 매초 갱신되므로).
+     * 알림 내용은 읽지 않음.
+     */
+    private fun logFirstSeen(sbn: StatusBarNotification) {
+        val key = "${sbn.packageName}|${sbn.notification.channelId}|${sbn.isPersistent()}"
+        if (!seen.add(key)) return
+        DiagLog.log(this, "내비 앱 알림: ${NAV_APPS[sbn.packageName]} ${sbn.describe()} 고정=${if (sbn.isPersistent()) "예" else "아니오"}")
     }
 
     override fun onNotificationRemoved(sbn: StatusBarNotification) {
@@ -58,6 +75,9 @@ class NavWatcher : NotificationListenerService() {
         @Volatile
         var active: String? = null
             private set
+
+        /** logFirstSeen에서 이미 기록한 알림 종류 */
+        private val seen = java.util.Collections.synchronizedSet(mutableSetOf<String>())
 
         /** 내비 상태가 바뀌면 호출됨 (실행 중인 AlertService가 등록) */
         var listener: (() -> Unit)? = null
