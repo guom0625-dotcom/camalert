@@ -14,6 +14,7 @@ import android.graphics.drawable.Icon
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
+import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.util.Log
@@ -35,6 +36,14 @@ class AlertService : Service(), LocationListener {
     private val navPaused get() = navApp != null && !navOverride
     private val muted get() = paused || navPaused
     private var lastLocationLog = 0L
+    private val main = Handler(Looper.getMainLooper())
+    /** 내비 앱이 화면에 떠 있는지 주기적으로 확인 */
+    private val screenPoll = object : Runnable {
+        override fun run() {
+            if (Prefs(this@AlertService).navAutoPause) NavWatcher.pollScreen(this@AlertService)
+            main.postDelayed(this, SCREEN_POLL_MS)
+        }
+    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -88,6 +97,7 @@ class AlertService : Service(), LocationListener {
     override fun onDestroy() {
         statusLine = null
         NavWatcher.listener = null
+        main.removeCallbacks(screenPoll)
         if (running) stopTracking()
         super.onDestroy()
     }
@@ -120,6 +130,8 @@ class AlertService : Service(), LocationListener {
         startTracking()
         chime.start()
         NavWatcher.listener = { onNavChanged() }
+        NavWatcher.resetScreen()
+        screenPoll.run()
         onNavChanged()
         return true
     }
@@ -159,6 +171,7 @@ class AlertService : Service(), LocationListener {
         running = false
         statusLine = null
         NavWatcher.listener = null
+        main.removeCallbacks(screenPoll)
         if (sound) chime.stop()
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
@@ -206,6 +219,7 @@ class AlertService : Service(), LocationListener {
         private const val CONNECTED_NOTIFICATION_ID = 2
         private const val CHANNEL_RUNNING = "running"
         private const val CHANNEL_CONNECTED = "connected"
+        private const val SCREEN_POLL_MS = 3_000L
 
         /** 설정 화면에 보여줄 현재 상태. 서비스가 꺼져 있으면 null */
         @Volatile

@@ -187,6 +187,14 @@ class SettingsActivity : Activity() {
                 }
                 startActivity(intent)
             }
+            permissionRow("사용 정보 접근 (화면에 뜬 내비 감지)", NavWatcher.hasUsageAccess(this)) {
+                try {
+                    startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS, Uri.parse("package:$packageName")))
+                } catch (e: Exception) {
+                    // 앱별 화면을 지원하지 않는 기기는 전체 목록으로
+                    startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
+                }
+            }
         }
         if (missingPermissions == 0) {
             // 다 허용됐으면 목록 대신 한 줄로
@@ -367,7 +375,7 @@ class SettingsActivity : Activity() {
                     changed()
                 }
             })
-            addView(caption("TMAP, 네이버 지도, 카카오내비, 카카오맵이 실행 중이면 소리 없이 멈추고, 꺼지면 다시 켭니다. '알림 접근' 권한이 필요합니다."))
+            addView(caption("TMAP, 네이버 지도, 카카오내비, 카카오맵이 화면(분할 화면 포함)에 떠 있거나 백그라운드에서 길안내 중이면 소리 없이 멈추고, 꺼지면 다시 켭니다. '알림 접근'과 '사용 정보 접근' 권한이 필요합니다."))
         })
 
         for (group in listOf(GuidanceGroup.ENFORCEMENT, GuidanceGroup.HAZARD, GuidanceGroup.INFO)) {
