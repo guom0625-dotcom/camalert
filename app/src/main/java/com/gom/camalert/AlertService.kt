@@ -109,7 +109,9 @@ class AlertService : Service(), LocationListener {
         } catch (e: Exception) {
             // 권한 부족이나 백그라운드 시작 제한
             Log.w(TAG, "startForeground failed", e)
-            DiagLog.log(this, "서비스 시작 실패: ${e.javaClass.simpleName} ${e.message}")
+            DiagLog.log(this, "서비스 시작 실패: ${e.javaClass.simpleName} ${e.message} → '눌러서 시작' 알림 표시")
+            statusLine = null
+            showTapToStart(this)
             stopSelf()
             return false
         }

@@ -60,13 +60,24 @@ object Updater {
     /**
      * 블로킹 호출. 내려받아 설치 세션을 커밋한다.
      * onProgress(받은 바이트, 전체 바이트). 전체 크기를 모르면 -1.
+     * skipIfDriving: 내려받는 사이 다시 차에 타서 카메라 알림이 켜졌으면 설치하지 않음 (앱이 재시작되므로)
      */
-    fun install(context: Context, release: Release, onProgress: (Long, Long) -> Unit = { _, _ -> }): Boolean {
+    fun install(
+        context: Context,
+        release: Release,
+        skipIfDriving: Boolean = false,
+        onProgress: (Long, Long) -> Unit = { _, _ -> },
+    ): Boolean {
         if (!context.packageManager.canRequestPackageInstalls()) return false
         if (!busy.compareAndSet(false, true)) return false
         return try {
             val apk = File(context.cacheDir, "update.apk")
             download(release.apkUrl, apk, onProgress)
+            if (skipIfDriving && AlertService.statusLine != null) {
+                DiagLog.log(context, "자동 업데이트: 카메라 알림이 다시 켜져서 설치를 미룸")
+                apk.delete()
+                return false
+            }
 
             val installer = context.packageManager.packageInstaller
             val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL)
@@ -130,9 +141,12 @@ object Updater {
         val app = context.applicationContext
         Thread {
             val release = findNewer(app) ?: return@Thread
+            // 확인하는 사이 다시 차에 탔으면 다음 하차 때로 미룸
+            if (AlertService.statusLine != null) return@Thread
             DiagLog.log(app, "자동 업데이트: ${release.versionName} 내려받기 시작")
-            val ok = install(app, release)
-            DiagLog.log(app, "자동 업데이트: ${if (ok) "설치 요청됨" else "실패"}")
+            val ok = install(app, release, skipIfDriving = true)
+            if (ok) DiagLog.log(app, "자동 업데이트: 설치 요청됨")
+            else if (AlertService.statusLine == null) DiagLog.log(app, "자동 업데이트: 실패")
         }.start()
     }
 

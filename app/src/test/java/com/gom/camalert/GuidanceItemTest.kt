@@ -59,4 +59,14 @@ class GuidanceItemTest {
         // 기준이 있는데 속도를 모르면 울리지 않음
         assertFalse(shouldWarnOverspeed(Prefs.OVERSPEED_ALL, 5, false, null, 60))
     }
+
+    @Test
+    fun startDistance() {
+        // 기준 500m + 여유 150m까지는 안내
+        assertTrue(withinStartDistance(650, 500))
+        assertFalse(withinStartDistance(651, 500))
+        assertTrue(withinStartDistance(0, 300))
+        // 경로가 달라 거리를 모르면 막지 않음
+        assertTrue(withinStartDistance(null, 300))
+    }
 }

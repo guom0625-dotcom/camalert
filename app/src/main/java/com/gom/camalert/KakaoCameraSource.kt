@@ -8,6 +8,7 @@ import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import com.kakaomobility.knsdk.KNLanguageType
 import com.kakaomobility.knsdk.KNRouteAvoidOption
@@ -36,6 +37,7 @@ import com.kakaomobility.knsdk.guidance.knguidance.safetyguide.objects.KNSafety_
 import com.kakaomobility.knsdk.guidance.knguidance.voiceguide.KNGuide_Voice
 import java.io.File
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * 카카오내비 SDK 안전운행 모드(목적지 없는 주행).
@@ -56,7 +58,21 @@ class KakaoCameraSource(private val app: Application) : CameraSource, KNGuidance
     private var onStatus: (() -> Unit)? = null
     private var guidance: KNDriveGuidance? = null
     private var active = false
-    @Volatile private var speedKmh: Float? = null
+    @Volatile private var lastSpeedKmh: Float? = null
+    @Volatile private var lastSpeedAt = 0L
+    /** 최근 GPS 속도. 터널처럼 GPS가 끊기면 예전 값으로 판단하지 않도록 오래된 값은 버림 */
+    private val speedKmh: Float?
+        get() = lastSpeedKmh?.takeIf { SystemClock.elapsedRealtime() - lastSpeedAt <= SPEED_MAX_AGE_MS }
+    /** 인증 실패 후 다시 시도할 때까지 기다리는 시간(ms). 실패할수록 늘어남 */
+    private var retryDelay = RETRY_MIN_MS
+    private val retryInit = Runnable {
+        if (!active) return@Runnable
+        when (KNSDK.initSt) {
+            KNSDKInitState.KNSDKInitState_Initialized -> startGuidance()
+            KNSDKInitState.KNSDKInitState_OnInitializing -> Unit
+            else -> initialize()
+        }
+    }
     /** 지금 나오고 있는 안내. 설정에서 음량을 바꾸면 바로 반영하려고 들고 있음 */
     @Volatile private var playing: KNGuide_Voice? = null
     private val volumeListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
@@ -64,10 +80,10 @@ class KakaoCameraSource(private val app: Application) : CameraSource, KNGuidance
     }
 
     // 진단용: SDK가 GPS와 위치/안전 안내를 실제로 받고 있는지 1분 단위로 센다
-    @Volatile private var sdkGps = 0
-    @Volatile private var sdkGpsValid = 0
-    @Volatile private var locationUpdates = 0
-    @Volatile private var safetyUpdates = 0
+    private val sdkGps = AtomicInteger()
+    private val sdkGpsValid = AtomicInteger()
+    private val locationUpdates = AtomicInteger()
+    private val safetyUpdates = AtomicInteger()
     @Volatile private var aroundSafeties = 0
 
     private val audio = app.getSystemService(AudioManager::class.java)
@@ -82,6 +98,8 @@ class KakaoCameraSource(private val app: Application) : CameraSource, KNGuidance
     override fun start(onStatus: () -> Unit) {
         this.onStatus = onStatus
         active = true
+        current = this
+        retryDelay = RETRY_MIN_MS
         app.getSharedPreferences("camalert", Context.MODE_PRIVATE).registerOnSharedPreferenceChangeListener(volumeListener)
 
         if (!installed) {
@@ -90,23 +108,36 @@ class KakaoCameraSource(private val app: Application) : CameraSource, KNGuidance
         }
         when (KNSDK.initSt) {
             KNSDKInitState.KNSDKInitState_Initialized -> startGuidance()
-            KNSDKInitState.KNSDKInitState_OnInitializing -> Unit // 진행 중인 초기화 콜백에서 시작됨
+            // 진행 중인 초기화 콜백이 current(=이 객체)로 결과를 넘겨줌
+            KNSDKInitState.KNSDKInitState_OnInitializing -> Unit
             else -> initialize()
         }
     }
 
     override fun stop() {
         active = false
+        if (current === this) current = null
+        main.removeCallbacks(retryInit)
         app.getSharedPreferences("camalert", Context.MODE_PRIVATE).unregisterOnSharedPreferenceChangeListener(volumeListener)
         playing = null
-        guidance?.stop()
+        guidance?.let {
+            it.stop()
+            // 공유 객체라 풀어 두지 않으면 다음 운전까지 이 객체가 콜백을 계속 받음
+            if (it.voiceGuideDelegate === this) it.voiceGuideDelegate = null
+            if (it.locationGuideDelegate === this) it.locationGuideDelegate = null
+            if (it.safetyGuideDelegate === this) it.safetyGuideDelegate = null
+            if (it.guideStateDelegate === this) it.guideStateDelegate = null
+        }
         guidance = null
         KNSDK.sharedGpsManager()?.stopUpdate(this)
         audio.abandonAudioFocusRequest(focus)
     }
 
     override fun onLocation(location: Location) {
-        speedKmh = if (location.hasSpeed()) location.speed * 3.6f else null
+        if (location.hasSpeed()) {
+            lastSpeedKmh = location.speed * 3.6f
+            lastSpeedAt = SystemClock.elapsedRealtime()
+        }
     }
 
     /** SDK가 도로 위 위치를 잡고 있는지 (직전 기록 이후 받은 횟수) */
@@ -115,22 +146,22 @@ class KakaoCameraSource(private val app: Application) : CameraSource, KNGuidance
         val here = g.locationGuide?.let { it.location ?: it.locationForPrimaryRoute }
         val road = here?.roadType?.name?.removePrefix("KNRoadType_") ?: "위치 없음"
         val text = "카카오 상태=${g.guideState.name.removePrefix("KNGuideState_")} 도로=$road" +
-            " SDK-GPS=$sdkGps(유효 $sdkGpsValid) 위치갱신=$locationUpdates 안전갱신=$safetyUpdates 주변=$aroundSafeties"
-        sdkGps = 0; sdkGpsValid = 0; locationUpdates = 0; safetyUpdates = 0
+            " SDK-GPS=${sdkGps.getAndSet(0)}(유효 ${sdkGpsValid.getAndSet(0)})" +
+            " 위치갱신=${locationUpdates.getAndSet(0)} 안전갱신=${safetyUpdates.getAndSet(0)} 주변=$aroundSafeties"
         return text
     }
 
     override fun didReceiveGpsData(data: KNGPSData) {
-        sdkGps++
-        if (data.valid) sdkGpsValid++
+        sdkGps.incrementAndGet()
+        if (data.valid) sdkGpsValid.incrementAndGet()
     }
 
     override fun guidanceDidUpdateLocation(guidance: KNGuidance, locationGuide: KNGuide_Location) {
-        locationUpdates++
+        locationUpdates.incrementAndGet()
     }
 
     override fun guidanceDidUpdateSafetyGuide(guidance: KNGuidance, safetyGuide: KNGuide_Safety?) {
-        safetyUpdates++
+        safetyUpdates.incrementAndGet()
     }
 
     override fun guidanceDidUpdateAroundSafeties(guidance: KNGuidance, safeties: List<KNSafety>?) {
@@ -161,16 +192,26 @@ class KakaoCameraSource(private val app: Application) : CameraSource, KNGuidance
             null,
             KNLanguageType.KNLanguageType_KOREAN,
         ) { error ->
-            main.post {
-                if (error != null) {
-                    Log.w(TAG, "KNSDK init failed: ${error.code} ${error.msg}")
-                    DiagLog.log(app, "카카오 인증 실패: code=${error.code} msg=${error.msg} tag=${error.tagMsg}")
-                    setStatus("카카오내비 인증 실패 (${error.code}) ${error.msg}")
-                } else {
-                    startGuidance()
-                }
-            }
+            // 초기화 도중 서비스가 다시 만들어졌으면 결과는 새 객체가 받아야 함
+            main.post { current?.onInitialized(error) }
         }
+    }
+
+    private fun onInitialized(error: KNError?) {
+        if (!active) return
+        if (error == null) {
+            retryDelay = RETRY_MIN_MS
+            startGuidance()
+            return
+        }
+        // 지하주차장처럼 통신이 안 되는 곳에서 출발하면 실패하므로 될 때까지 다시 시도
+        Log.w(TAG, "KNSDK init failed: ${error.code} ${error.msg}")
+        val seconds = retryDelay / 1000
+        DiagLog.log(app, "카카오 인증 실패: code=${error.code} msg=${error.msg} tag=${error.tagMsg} → ${seconds}초 뒤 다시 시도")
+        setStatus("카카오내비 인증 실패 (${error.code}) · ${seconds}초 뒤 다시 시도")
+        main.removeCallbacks(retryInit)
+        main.postDelayed(retryInit, retryDelay)
+        retryDelay = (retryDelay * 2).coerceAtMost(RETRY_MAX_MS)
     }
 
     private fun startGuidance() {
@@ -252,9 +293,7 @@ class KakaoCameraSource(private val app: Application) : CameraSource, KNGuidance
         if (!prefs.isOn(item)) return false
         // 구간단속 구간 안에서 나오는 안내(평균속도, 남은 거리)는 종료 지점이 멀어도 막지 않음
         if (sectionAverage(safety) != null) return true
-        val distance = distanceTo(guidance, safety) ?: return true
-        // 안내 지점이 기준 거리보다 약간 앞서 나오는 경우를 감안해 여유를 둠
-        return distance <= startDistance(guidance) + DISTANCE_MARGIN
+        return withinStartDistance(distanceTo(guidance, safety), startDistance(guidance))
     }
 
     /** 경로상 남은 거리(m). 같은 경로 위에 있지 않으면 null */
@@ -300,8 +339,12 @@ class KakaoCameraSource(private val app: Application) : CameraSource, KNGuidance
 
     companion object {
         private const val TAG = "KakaoCameraSource"
-        private const val DISTANCE_MARGIN = 150
+        private const val SPEED_MAX_AGE_MS = 3_000L
+        private const val RETRY_MIN_MS = 10_000L
+        private const val RETRY_MAX_MS = 60_000L
         private var installed = false
+        /** 지금 서비스가 쓰고 있는 객체 (메인 스레드에서만 읽고 씀) */
+        private var current: KakaoCameraSource? = null
 
         /** 앱 키가 들어간 빌드인지 */
         val available get() = BuildConfig.KAKAO_APP_KEY.isNotEmpty()

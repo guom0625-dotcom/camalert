@@ -19,17 +19,18 @@ object DiagLog {
     private const val COPY_BYTES = 200_000L
 
     private val writer = Executors.newSingleThreadExecutor()
+    // SimpleDateFormat은 스레드에 안전하지 않으므로 기록 스레드에서만 씀
     private val time = SimpleDateFormat("MM-dd HH:mm:ss", Locale.KOREA)
 
     fun log(context: Context, message: String) {
         Log.i("CamalertDiag", message)
         val app = context.applicationContext
         if (!Prefs(app).diagEnabled) return
-        val line = "${time.format(Date())} $message\n"
+        val now = System.currentTimeMillis()
         writer.execute {
             try {
                 val file = File(app.filesDir, FILE)
-                file.appendText(line)
+                file.appendText("${time.format(Date(now))} $message\n")
                 if (file.length() > MAX_BYTES) trim(file)
             } catch (e: Exception) {
                 Log.w("CamalertDiag", "write failed", e)

@@ -34,8 +34,12 @@ class NavWatcher : NotificationListenerService() {
             return
         }
         val found = notifications.firstOrNull { it.packageName in NAV_APPS && it.isPersistent() }
-        update(this, found?.let { NAV_APPS[it.packageName] })
+        update(this, found?.let { NAV_APPS[it.packageName] }, found?.describe())
     }
+
+    /** 진단용: 길안내 알림과 다른 고정 알림(위치 공유 등)을 나중에 구분할 수 있게 종류만 남김. 내용은 읽지 않음 */
+    private fun StatusBarNotification.describe() =
+        "채널=${notification.channelId} 분류=${notification.category ?: "-"}"
 
     private fun StatusBarNotification.isPersistent() =
         isOngoing || notification.flags and Notification.FLAG_FOREGROUND_SERVICE != 0
@@ -58,10 +62,10 @@ class NavWatcher : NotificationListenerService() {
         /** 내비 상태가 바뀌면 호출됨 (실행 중인 AlertService가 등록) */
         var listener: (() -> Unit)? = null
 
-        private fun update(context: Context, name: String?) {
+        private fun update(context: Context, name: String?, detail: String? = null) {
             if (name == active) return
             active = name
-            DiagLog.log(context, if (name != null) "내비 실행 감지: $name" else "내비 종료 감지")
+            DiagLog.log(context, if (name != null) "내비 실행 감지: $name ($detail)" else "내비 종료 감지")
             listener?.invoke()
         }
 

@@ -90,3 +90,10 @@ fun shouldWarnOverspeed(mode: Int, thresholdPercent: Int, isMobileCamera: Boolea
     if (speedKmh == null || limit == null || limit <= 0) return false
     return speedKmh > limit * (100 + thresholdPercent) / 100f
 }
+
+/** 안내 지점이 기준 거리보다 약간 앞서 나오는 경우를 감안한 여유(m) */
+const val DISTANCE_MARGIN = 150
+
+/** 안내 시작 거리 안쪽인지. 남은 거리를 모르면(경로가 다르면) 막지 않는다. */
+fun withinStartDistance(distance: Int?, startDistance: Int): Boolean =
+    distance == null || distance <= startDistance + DISTANCE_MARGIN
