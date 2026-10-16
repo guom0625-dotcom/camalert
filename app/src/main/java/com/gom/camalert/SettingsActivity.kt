@@ -323,15 +323,9 @@ class SettingsActivity : Activity() {
         })
 
         val modes = listOf(Prefs.OVERSPEED_OFF to "끄기", Prefs.OVERSPEED_EXCEPT_MOBILE to "이동식 제외", Prefs.OVERSPEED_ALL to "모두")
-        val thresholds = listOf(0 to "즉시", 5 to "5% 초과", 10 to "10% 초과")
-        section("과속 경고음", {
-            val mode = modes.first { it.first == prefs.overspeedMode }.second
-            if (prefs.overspeedMode == Prefs.OVERSPEED_OFF) mode
-            else "$mode · ${thresholds.first { it.first == prefs.overspeedPercent }.second}"
-        }, vertical().apply {
+        section("과속 경고음", { modes.first { it.first == prefs.overspeedMode }.second }, vertical().apply {
             addView(choices(modes, prefs.overspeedMode) { prefs.overspeedMode = it; changed() })
-            addView(caption("경고 기준 (제한속도 대비)"))
-            addView(choices(thresholds, prefs.overspeedPercent) { prefs.overspeedPercent = it; changed() })
+            addView(caption("카메라 통과음과 과속 경고음. 울리는 시점은 카카오내비 안전운행 모드와 같습니다."))
         })
 
         section("음량", { "${prefs.volume}%" + if (prefs.duckOthers) " · 다른 소리 줄임" else "" }, vertical().apply {

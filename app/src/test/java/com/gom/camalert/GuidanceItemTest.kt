@@ -46,18 +46,12 @@ class GuidanceItemTest {
 
     @Test
     fun overspeedWarning() {
-        // 끄기
-        assertFalse(shouldWarnOverspeed(Prefs.OVERSPEED_OFF, 0, false, 100f, 60))
-        // 이동식 제외
-        assertFalse(shouldWarnOverspeed(Prefs.OVERSPEED_EXCEPT_MOBILE, 0, true, 100f, 60))
-        assertTrue(shouldWarnOverspeed(Prefs.OVERSPEED_ALL, 0, true, 100f, 60))
-        // 즉시: SDK가 울리면 그대로
-        assertTrue(shouldWarnOverspeed(Prefs.OVERSPEED_EXCEPT_MOBILE, 0, false, null, null))
-        // 10% 초과: 60 제한이면 66 넘어야
-        assertFalse(shouldWarnOverspeed(Prefs.OVERSPEED_ALL, 10, false, 65f, 60))
-        assertTrue(shouldWarnOverspeed(Prefs.OVERSPEED_ALL, 10, false, 67f, 60))
-        // 기준이 있는데 속도를 모르면 울리지 않음
-        assertFalse(shouldWarnOverspeed(Prefs.OVERSPEED_ALL, 5, false, null, 60))
+        assertFalse(shouldWarnOverspeed(Prefs.OVERSPEED_OFF, false))
+        assertFalse(shouldWarnOverspeed(Prefs.OVERSPEED_OFF, true))
+        assertTrue(shouldWarnOverspeed(Prefs.OVERSPEED_EXCEPT_MOBILE, false))
+        assertFalse(shouldWarnOverspeed(Prefs.OVERSPEED_EXCEPT_MOBILE, true))
+        assertTrue(shouldWarnOverspeed(Prefs.OVERSPEED_ALL, false))
+        assertTrue(shouldWarnOverspeed(Prefs.OVERSPEED_ALL, true))
     }
 
     @Test

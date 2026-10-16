@@ -82,13 +82,14 @@ enum class GuidanceItem(val label: String, val group: GuidanceGroup, val default
     }
 }
 
-/** 과속 경고음을 낼지. speedKmh/limit가 없으면 기준이 "즉시"일 때만 SDK 판단을 따른다. */
-fun shouldWarnOverspeed(mode: Int, thresholdPercent: Int, isMobileCamera: Boolean, speedKmh: Float?, limit: Int?): Boolean {
-    if (mode == Prefs.OVERSPEED_OFF) return false
-    if (mode == Prefs.OVERSPEED_EXCEPT_MOBILE && isMobileCamera) return false
-    if (thresholdPercent == 0) return true
-    if (speedKmh == null || limit == null || limit <= 0) return false
-    return speedKmh > limit * (100 + thresholdPercent) / 100f
+/**
+ * 경고음(카메라 통과음 Alram, 과속 경고 Alert)을 낼지. 카카오내비 안전운행 모드처럼
+ * 언제 울릴지는 SDK 판단을 그대로 따르고, 설정으로는 끄기/이동식 제외만 고른다.
+ */
+fun shouldWarnOverspeed(mode: Int, isMobileCamera: Boolean): Boolean = when (mode) {
+    Prefs.OVERSPEED_OFF -> false
+    Prefs.OVERSPEED_EXCEPT_MOBILE -> !isMobileCamera
+    else -> true
 }
 
 /** 안내 지점이 기준 거리보다 약간 앞서 나오는 경우를 감안한 여유(m) */

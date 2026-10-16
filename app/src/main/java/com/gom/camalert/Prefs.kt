@@ -18,8 +18,6 @@ class Prefs(context: Context) {
     var localDistance by intPref("local_distance", 500)
 
     var overspeedMode by intPref("overspeed_mode", OVERSPEED_EXCEPT_MOBILE)
-    /** 제한속도 대비 몇 % 넘으면 경고음 (0 = 즉시) */
-    var overspeedPercent by intPref("overspeed_percent", 0)
 
     /** 카카오 음성 크기 0~100 */
     var volume by intPref("volume", 100)

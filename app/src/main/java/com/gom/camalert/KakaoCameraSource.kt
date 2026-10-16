@@ -254,14 +254,10 @@ class KakaoCameraSource(private val app: Application) : CameraSource, KNGuidance
         val play = when (voiceGuide.voiceCode.name) {
             "KNVoiceCode_Safety" -> safety != null && allowed(guidance, safety)
             "KNVoiceCode_SchoolZone" -> prefs.isOn(GuidanceItem.CHILD_ZONE)
-            // 과속 경고음
+            // 경고음: Alram = 카메라 통과음, Alert = 과속 경고
             "KNVoiceCode_Alert", "KNVoiceCode_Alram" -> shouldWarnOverspeed(
                 mode = prefs.overspeedMode,
-                thresholdPercent = prefs.overspeedPercent,
                 isMobileCamera = safety?.code?.name == "KNSafetyCode_MovableSpeedViolationCamera",
-                // 구간단속은 순간 속도가 아니라 구간 평균속도로 판단
-                speedKmh = sectionAverage(safety)?.toFloat() ?: speedKmh,
-                limit = (safety as? KNSafety_Camera)?.speedLimit,
             )
             // 길 안내 관련 음성(경로 이탈, 회전 등)은 안전운행 모드에서 쓰지 않음
             else -> false
@@ -322,7 +318,7 @@ class KakaoCameraSource(private val app: Application) : CameraSource, KNGuidance
                 }
             }
             "KNVoiceCode_SchoolZone" -> "'어린이 보호구역' 꺼짐"
-            "KNVoiceCode_Alert", "KNVoiceCode_Alram" -> "과속 경고 설정 (모드=${prefs.overspeedMode}, 기준=${prefs.overspeedPercent}%)"
+            "KNVoiceCode_Alert", "KNVoiceCode_Alram" -> "경고음 설정 (모드=${prefs.overspeedMode})"
             else -> "길 안내 음성"
         }
 
