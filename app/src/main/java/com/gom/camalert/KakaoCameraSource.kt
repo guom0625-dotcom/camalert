@@ -32,6 +32,7 @@ import com.kakaomobility.knsdk.guidance.knguidance.KNGuidance_VoiceGuideDelegate
 import com.kakaomobility.knsdk.guidance.knguidance.KNGuideFrequencyMode
 import com.kakaomobility.knsdk.guidance.knguidance.safetyguide.objects.KNSafety
 import com.kakaomobility.knsdk.guidance.knguidance.safetyguide.objects.KNSafety_Camera
+import com.kakaomobility.knsdk.guidance.knguidance.safetyguide.objects.KNSafety_Section
 import com.kakaomobility.knsdk.guidance.knguidance.voiceguide.KNGuide_Voice
 import java.io.File
 import java.util.UUID
@@ -203,6 +204,7 @@ class KakaoCameraSource(private val app: Application) : CameraSource, KNGuidance
             " 단계=${voiceGuide.voiceDist?.name?.removePrefix("KNVoiceDist_")}" +
             ((safety as? KNSafety_Camera)?.speedLimit?.takeIf { it > 0 }?.let { " 제한=$it" } ?: "") +
             (speedKmh?.let { " 속도=${it.toInt()}" } ?: "") +
+            (sectionAverage(safety)?.let { " 구간평균=$it" } ?: "") +
             (distanceTo(guidance, safety)?.let { " 거리=${it}m" } ?: "")
         if (!active || muted) {
             DiagLog.log(app, "안내 무시 (${if (muted) "멈춤 중" else "비활성"}): $what")
@@ -216,7 +218,8 @@ class KakaoCameraSource(private val app: Application) : CameraSource, KNGuidance
                 mode = prefs.overspeedMode,
                 thresholdPercent = prefs.overspeedPercent,
                 isMobileCamera = safety?.code?.name == "KNSafetyCode_MovableSpeedViolationCamera",
-                speedKmh = speedKmh,
+                // 구간단속은 순간 속도가 아니라 구간 평균속도로 판단
+                speedKmh = sectionAverage(safety)?.toFloat() ?: speedKmh,
                 limit = (safety as? KNSafety_Camera)?.speedLimit,
             )
             // 길 안내 관련 음성(경로 이탈, 회전 등)은 안전운행 모드에서 쓰지 않음
@@ -247,6 +250,8 @@ class KakaoCameraSource(private val app: Application) : CameraSource, KNGuidance
     private fun allowed(guidance: KNGuidance, safety: KNSafety): Boolean {
         val item = GuidanceItem.of(safety.code.name) ?: return false
         if (!prefs.isOn(item)) return false
+        // 구간단속 구간 안에서 나오는 안내(평균속도, 남은 거리)는 종료 지점이 멀어도 막지 않음
+        if (sectionAverage(safety) != null) return true
         val distance = distanceTo(guidance, safety) ?: return true
         // 안내 지점이 기준 거리보다 약간 앞서 나오는 경우를 감안해 여유를 둠
         return distance <= startDistance(guidance) + DISTANCE_MARGIN
@@ -281,6 +286,10 @@ class KakaoCameraSource(private val app: Application) : CameraSource, KNGuidance
             "KNVoiceCode_Alert", "KNVoiceCode_Alram" -> "과속 경고 설정 (모드=${prefs.overspeedMode}, 기준=${prefs.overspeedPercent}%)"
             else -> "길 안내 음성"
         }
+
+    /** 구간단속 구간 안이면 지금까지의 평균속도(km/h) */
+    private fun sectionAverage(safety: KNSafety?) =
+        (safety as? KNSafety_Section)?.sectionAvrSpeed?.takeIf { it > 0 }
 
     private fun currentVolume() = prefs.volume.coerceIn(0, 100) / 100f
 
