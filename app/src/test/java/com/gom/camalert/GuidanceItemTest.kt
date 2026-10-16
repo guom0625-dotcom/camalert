@@ -45,13 +45,13 @@ class GuidanceItemTest {
     }
 
     @Test
-    fun overspeedWarning() {
-        assertFalse(shouldWarnOverspeed(Prefs.OVERSPEED_OFF, false))
-        assertFalse(shouldWarnOverspeed(Prefs.OVERSPEED_OFF, true))
-        assertTrue(shouldWarnOverspeed(Prefs.OVERSPEED_EXCEPT_MOBILE, false))
-        assertFalse(shouldWarnOverspeed(Prefs.OVERSPEED_EXCEPT_MOBILE, true))
-        assertTrue(shouldWarnOverspeed(Prefs.OVERSPEED_ALL, false))
-        assertTrue(shouldWarnOverspeed(Prefs.OVERSPEED_ALL, true))
+    fun warningSound() {
+        assertFalse(shouldPlayWarningSound(Prefs.OVERSPEED_OFF, false))
+        assertFalse(shouldPlayWarningSound(Prefs.OVERSPEED_OFF, true))
+        assertTrue(shouldPlayWarningSound(Prefs.OVERSPEED_EXCEPT_MOBILE, false))
+        assertFalse(shouldPlayWarningSound(Prefs.OVERSPEED_EXCEPT_MOBILE, true))
+        assertTrue(shouldPlayWarningSound(Prefs.OVERSPEED_ALL, false))
+        assertTrue(shouldPlayWarningSound(Prefs.OVERSPEED_ALL, true))
     }
 
     @Test

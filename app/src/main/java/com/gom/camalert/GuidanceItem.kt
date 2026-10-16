@@ -86,14 +86,14 @@ enum class GuidanceItem(val label: String, val group: GuidanceGroup, val default
  * 경고음(카메라 통과음 Alram, 과속 경고 Alert)을 낼지. 카카오내비 안전운행 모드처럼
  * 언제 울릴지는 SDK 판단을 그대로 따르고, 설정으로는 끄기/이동식 제외만 고른다.
  */
-fun shouldWarnOverspeed(mode: Int, isMobileCamera: Boolean): Boolean = when (mode) {
+fun shouldPlayWarningSound(mode: Int, isMobileCamera: Boolean): Boolean = when (mode) {
     Prefs.OVERSPEED_OFF -> false
     Prefs.OVERSPEED_EXCEPT_MOBILE -> !isMobileCamera
     else -> true
 }
 
 /** 안내 지점이 기준 거리보다 약간 앞서 나오는 경우를 감안한 여유(m) */
-const val DISTANCE_MARGIN = 150
+private const val DISTANCE_MARGIN = 150
 
 /** 안내 시작 거리 안쪽인지. 남은 거리를 모르면(경로가 다르면) 막지 않는다. */
 fun withinStartDistance(distance: Int?, startDistance: Int): Boolean =

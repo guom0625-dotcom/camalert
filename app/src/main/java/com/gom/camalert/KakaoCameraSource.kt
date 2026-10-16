@@ -8,7 +8,6 @@ import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.os.Handler
 import android.os.Looper
-import android.os.SystemClock
 import android.util.Log
 import com.kakaomobility.knsdk.KNLanguageType
 import com.kakaomobility.knsdk.KNRouteAvoidOption
@@ -58,11 +57,8 @@ class KakaoCameraSource(private val app: Application) : CameraSource, KNGuidance
     private var onStatus: (() -> Unit)? = null
     private var guidance: KNDriveGuidance? = null
     private var active = false
-    @Volatile private var lastSpeedKmh: Float? = null
-    @Volatile private var lastSpeedAt = 0L
-    /** 최근 GPS 속도. 터널처럼 GPS가 끊기면 예전 값으로 판단하지 않도록 오래된 값은 버림 */
-    private val speedKmh: Float?
-        get() = lastSpeedKmh?.takeIf { SystemClock.elapsedRealtime() - lastSpeedAt <= SPEED_MAX_AGE_MS }
+    /** 진단 기록용 GPS 속도 */
+    @Volatile private var speedKmh: Float? = null
     /** 인증 실패 후 다시 시도할 때까지 기다리는 시간(ms). 실패할수록 늘어남 */
     private var retryDelay = RETRY_MIN_MS
     private val retryInit = Runnable {
@@ -134,10 +130,7 @@ class KakaoCameraSource(private val app: Application) : CameraSource, KNGuidance
     }
 
     override fun onLocation(location: Location) {
-        if (location.hasSpeed()) {
-            lastSpeedKmh = location.speed * 3.6f
-            lastSpeedAt = SystemClock.elapsedRealtime()
-        }
+        speedKmh = if (location.hasSpeed()) location.speed * 3.6f else null
     }
 
     /** SDK가 도로 위 위치를 잡고 있는지 (직전 기록 이후 받은 횟수) */
@@ -255,7 +248,7 @@ class KakaoCameraSource(private val app: Application) : CameraSource, KNGuidance
             "KNVoiceCode_Safety" -> safety != null && allowed(guidance, safety)
             "KNVoiceCode_SchoolZone" -> prefs.isOn(GuidanceItem.CHILD_ZONE)
             // 경고음: Alram = 카메라 통과음, Alert = 과속 경고
-            "KNVoiceCode_Alert", "KNVoiceCode_Alram" -> shouldWarnOverspeed(
+            "KNVoiceCode_Alert", "KNVoiceCode_Alram" -> shouldPlayWarningSound(
                 mode = prefs.overspeedMode,
                 isMobileCamera = safety?.code?.name == "KNSafetyCode_MovableSpeedViolationCamera",
             )
@@ -335,7 +328,6 @@ class KakaoCameraSource(private val app: Application) : CameraSource, KNGuidance
 
     companion object {
         private const val TAG = "KakaoCameraSource"
-        private const val SPEED_MAX_AGE_MS = 3_000L
         private const val RETRY_MIN_MS = 10_000L
         private const val RETRY_MAX_MS = 60_000L
         private var installed = false

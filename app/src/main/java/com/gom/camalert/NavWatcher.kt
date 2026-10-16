@@ -18,7 +18,6 @@ import android.service.notification.StatusBarNotification
 class NavWatcher : NotificationListenerService() {
 
     override fun onListenerConnected() {
-        seen.clear()
         DiagLog.log(this, "알림 접근 연결됨 (내비 감지 준비)")
         check()
     }
@@ -29,21 +28,7 @@ class NavWatcher : NotificationListenerService() {
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
-        logFirstSeen(sbn)
         if (sbn.packageName in NAV_APPS) check()
-    }
-
-    /**
-     * 진단용: 내비 앱이 어떤 알림을 띄우는지 종류별로 처음 한 번만 남김 (길안내 중엔 매초 갱신되므로).
-     * 알림 내용은 읽지 않음.
-     */
-    private fun logFirstSeen(sbn: StatusBarNotification) {
-        val known = NAV_APPS[sbn.packageName]
-        // 감지 목록에 없는 패키지명으로 설치된 내비가 있는지 보려고, 이름이 지도/내비 같은 앱도 남김
-        if (known == null && !NAV_LIKE.containsMatchIn(sbn.packageName)) return
-        val key = "${sbn.packageName}|${sbn.notification.channelId}|${sbn.isPersistent()}"
-        if (!seen.add(key)) return
-        DiagLog.log(this, "내비 앱 알림: ${known ?: "(목록에 없음)"} ${sbn.packageName} ${sbn.describe()} 고정=${if (sbn.isPersistent()) "예" else "아니오"}")
     }
 
     override fun onNotificationRemoved(sbn: StatusBarNotification) {
@@ -56,8 +41,6 @@ class NavWatcher : NotificationListenerService() {
         } catch (e: Exception) {
             return
         }
-        // 접근이 연결되기 전부터 떠 있던 알림도 기록되게
-        notifications.forEach(::logFirstSeen)
         val found = notifications.firstOrNull { it.packageName in NAV_APPS && it.isPersistent() }
         update(this, found?.let { NAV_APPS[it.packageName] }, found?.describe())
     }
@@ -92,11 +75,6 @@ class NavWatcher : NotificationListenerService() {
         /** 화면에 떠 있는 내비 액티비티 ("패키지/클래스") */
         private val visible = mutableSetOf<String>()
         private var lastQuery = 0L
-
-        private val NAV_LIKE = Regex("tmap|navi|map|kimgisa", RegexOption.IGNORE_CASE)
-
-        /** logFirstSeen에서 이미 기록한 알림 종류 */
-        private val seen = java.util.Collections.synchronizedSet(mutableSetOf<String>())
 
         /** 내비 상태가 바뀌면 호출됨 (실행 중인 AlertService가 등록) */
         var listener: (() -> Unit)? = null

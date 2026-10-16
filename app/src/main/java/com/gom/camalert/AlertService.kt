@@ -157,7 +157,7 @@ class AlertService : Service(), LocationListener {
             getSystemService(LocationManager::class.java)
                 .requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 0f, this, Looper.getMainLooper())
         } else {
-            DiagLog.log(this, "위치 권한 없음: 과속 경고 기준(5%/10%) 판단 불가")
+            DiagLog.log(this, "위치 권한 없음: 카카오 안내가 위치를 받지 못할 수 있음")
         }
     }
 
