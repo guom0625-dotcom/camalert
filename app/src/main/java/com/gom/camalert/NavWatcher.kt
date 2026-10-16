@@ -25,9 +25,8 @@ class NavWatcher : NotificationListenerService() {
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
-        if (sbn.packageName !in NAV_APPS) return
         logFirstSeen(sbn)
-        check()
+        if (sbn.packageName in NAV_APPS) check()
     }
 
     /**
@@ -35,9 +34,12 @@ class NavWatcher : NotificationListenerService() {
      * 알림 내용은 읽지 않음.
      */
     private fun logFirstSeen(sbn: StatusBarNotification) {
+        val known = NAV_APPS[sbn.packageName]
+        // 감지 목록에 없는 패키지명으로 설치된 내비가 있는지 보려고, 이름이 지도/내비 같은 앱도 남김
+        if (known == null && !NAV_LIKE.containsMatchIn(sbn.packageName)) return
         val key = "${sbn.packageName}|${sbn.notification.channelId}|${sbn.isPersistent()}"
         if (!seen.add(key)) return
-        DiagLog.log(this, "내비 앱 알림: ${NAV_APPS[sbn.packageName]} ${sbn.describe()} 고정=${if (sbn.isPersistent()) "예" else "아니오"}")
+        DiagLog.log(this, "내비 앱 알림: ${known ?: "(목록에 없음)"} ${sbn.packageName} ${sbn.describe()} 고정=${if (sbn.isPersistent()) "예" else "아니오"}")
     }
 
     override fun onNotificationRemoved(sbn: StatusBarNotification) {
@@ -50,6 +52,8 @@ class NavWatcher : NotificationListenerService() {
         } catch (e: Exception) {
             return
         }
+        // 접근이 연결되기 전부터 떠 있던 알림도 기록되게
+        notifications.forEach(::logFirstSeen)
         val found = notifications.firstOrNull { it.packageName in NAV_APPS && it.isPersistent() }
         update(this, found?.let { NAV_APPS[it.packageName] }, found?.describe())
     }
@@ -75,6 +79,8 @@ class NavWatcher : NotificationListenerService() {
         @Volatile
         var active: String? = null
             private set
+
+        private val NAV_LIKE = Regex("tmap|navi|map|kimgisa", RegexOption.IGNORE_CASE)
 
         /** logFirstSeen에서 이미 기록한 알림 종류 */
         private val seen = java.util.Collections.synchronizedSet(mutableSetOf<String>())
