@@ -8,6 +8,7 @@ import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import com.kakaomobility.knsdk.KNLanguageType
 import com.kakaomobility.knsdk.KNRouteAvoidOption
@@ -59,6 +60,11 @@ class KakaoCameraSource(private val app: Application) : CameraSource, KNGuidance
     private var active = false
     /** 진단 기록용 GPS 속도 */
     @Volatile private var speedKmh: Float? = null
+    @Volatile private var accuracyM: Float? = null
+    /** SDK GPS가 연속으로 유효해진 시각 (0 = 지금 유효하지 않음) */
+    @Volatile private var validSince = 0L
+    /** 위험 구간 항목별 마지막 안내 시각. 같은 종류가 몇 초 안에 몰려 나오면 한 번만 */
+    private val lastHazardAt = java.util.concurrent.ConcurrentHashMap<GuidanceItem, Long>()
     /** 인증 실패 후 다시 시도할 때까지 기다리는 시간(ms). 실패할수록 늘어남 */
     private var retryDelay = RETRY_MIN_MS
     private val retryInit = Runnable {
@@ -131,6 +137,7 @@ class KakaoCameraSource(private val app: Application) : CameraSource, KNGuidance
 
     override fun onLocation(location: Location) {
         speedKmh = if (location.hasSpeed()) location.speed * 3.6f else null
+        accuracyM = if (location.hasAccuracy()) location.accuracy else null
     }
 
     /** SDK가 도로 위 위치를 잡고 있는지 (직전 기록 이후 받은 횟수) */
@@ -146,7 +153,12 @@ class KakaoCameraSource(private val app: Application) : CameraSource, KNGuidance
 
     override fun didReceiveGpsData(data: KNGPSData) {
         sdkGps.incrementAndGet()
-        if (data.valid) sdkGpsValid.incrementAndGet()
+        if (data.valid) {
+            sdkGpsValid.incrementAndGet()
+            if (validSince == 0L) validSince = SystemClock.elapsedRealtime()
+        } else {
+            validSince = 0L
+        }
     }
 
     override fun guidanceDidUpdateLocation(guidance: KNGuidance, locationGuide: KNGuide_Location) {
@@ -244,22 +256,24 @@ class KakaoCameraSource(private val app: Application) : CameraSource, KNGuidance
             DiagLog.log(app, "안내 무시 (${if (muted) "멈춤 중" else "비활성"}): $what")
             return false
         }
-        val play = when (voiceGuide.voiceCode.name) {
-            "KNVoiceCode_Safety" -> safety != null && allowed(guidance, safety)
-            "KNVoiceCode_SchoolZone" -> prefs.isOn(GuidanceItem.CHILD_ZONE)
+        // null이면 재생, 아니면 거른 이유
+        val reason: String? = when (voiceGuide.voiceCode.name) {
+            "KNVoiceCode_Safety" -> if (safety == null) "대상 정보 없음" else blockReason(guidance, safety)
+            "KNVoiceCode_SchoolZone" -> if (prefs.isOn(GuidanceItem.CHILD_ZONE)) null else "'어린이 보호구역' 꺼짐"
             // 경고음: Alram = 카메라 통과음, Alert = 과속 경고
-            "KNVoiceCode_Alert", "KNVoiceCode_Alram" -> shouldPlayWarningSound(
-                mode = prefs.overspeedMode,
-                isMobileCamera = safety?.code?.name == "KNSafetyCode_MovableSpeedViolationCamera",
-            )
+            "KNVoiceCode_Alert", "KNVoiceCode_Alram" -> if (shouldPlayWarningSound(
+                    mode = prefs.overspeedMode,
+                    isMobileCamera = safety?.code?.name == "KNSafetyCode_MovableSpeedViolationCamera",
+                )) null else "경고음 설정 (모드=${prefs.overspeedMode})"
             // 길 안내 관련 음성(경로 이탈, 회전 등)은 안전운행 모드에서 쓰지 않음
-            else -> false
+            else -> "길 안내 음성"
         }
+        val play = reason == null
         if (play) {
             voiceGuide.setVolume(currentVolume())
             voiceGuide.setAudioAttribute(attributes)
         }
-        DiagLog.log(app, (if (play) "안내 재생 (음량 ${prefs.volume}%): " else "안내 거름 (${filterReason(guidance, voiceGuide, safety)}): ") + what)
+        DiagLog.log(app, (if (play) "안내 재생 (음량 ${prefs.volume}%): " else "안내 거름 ($reason): ") + what)
         return play
     }
 
@@ -276,13 +290,31 @@ class KakaoCameraSource(private val app: Application) : CameraSource, KNGuidance
         audio.abandonAudioFocusRequest(focus)
     }
 
-    /** 켜 둔 항목이고, 안내 시작 거리 안쪽일 때만 */
-    private fun allowed(guidance: KNGuidance, safety: KNSafety): Boolean {
-        val item = GuidanceItem.of(safety.code.name) ?: return false
-        if (!prefs.isOn(item)) return false
+    /** 안전 안내를 막는 이유. null이면 재생 (재생으로 판단하면 위험 구간 안내 시각을 기록함) */
+    private fun blockReason(guidance: KNGuidance, safety: KNSafety): String? {
+        val item = GuidanceItem.of(safety.code.name) ?: return "안내하지 않는 종류"
+        if (!prefs.isOn(item)) return "'${item.label}' 꺼짐"
+        val hazard = item.group == GuidanceGroup.HAZARD || item.group == GuidanceGroup.INFO
+        if (hazard) {
+            // 주차장을 나와 GPS가 막 잡히면 위치가 튀면서 주변 방지턱 등이 한꺼번에 쏟아짐. 단속 카메라는 막지 않음
+            if (!gpsSettled()) return "GPS 안정화 전 (정확도 ${accuracyM?.toInt() ?: "?"}m)"
+            val now = SystemClock.elapsedRealtime()
+            val last = lastHazardAt[item]
+            if (last != null && now - last < HAZARD_REPEAT_MS) return "방금 같은 안내"
+        }
         // 구간단속 구간 안에서 나오는 안내(평균속도, 남은 거리)는 종료 지점이 멀어도 막지 않음
-        if (sectionAverage(safety) != null) return true
-        return withinStartDistance(distanceTo(guidance, safety), startDistance(guidance))
+        if (sectionAverage(safety) == null && !withinStartDistance(distanceTo(guidance, safety), startDistance(guidance))) {
+            return "안내 시작 거리 ${startDistance(guidance)}m 밖"
+        }
+        if (hazard) lastHazardAt[item] = SystemClock.elapsedRealtime()
+        return null
+    }
+
+    /** GPS가 일정 시간 계속 유효하고 정확도도 괜찮은지 */
+    private fun gpsSettled(): Boolean {
+        val since = validSince
+        if (since == 0L || SystemClock.elapsedRealtime() - since < GPS_SETTLE_MS) return false
+        return (accuracyM ?: 0f) <= GPS_MAX_ACCURACY_M
     }
 
     /** 경로상 남은 거리(m). 같은 경로 위에 있지 않으면 null */
@@ -298,23 +330,6 @@ class KakaoCameraSource(private val app: Application) : CameraSource, KNGuidance
         return if (here?.roadType?.name == "KNRoadType_Highway") prefs.highwayDistance else prefs.localDistance
     }
 
-    /** 진단 기록용: 왜 걸렀는지 */
-    private fun filterReason(guidance: KNGuidance, voiceGuide: KNGuide_Voice, safety: KNSafety?): String =
-        when (voiceGuide.voiceCode.name) {
-            "KNVoiceCode_Safety" -> {
-                val item = safety?.let { GuidanceItem.of(it.code.name) }
-                when {
-                    safety == null -> "대상 정보 없음"
-                    item == null -> "안내하지 않는 종류"
-                    !prefs.isOn(item) -> "'${item.label}' 꺼짐"
-                    else -> "안내 시작 거리 ${startDistance(guidance)}m 밖"
-                }
-            }
-            "KNVoiceCode_SchoolZone" -> "'어린이 보호구역' 꺼짐"
-            "KNVoiceCode_Alert", "KNVoiceCode_Alram" -> "경고음 설정 (모드=${prefs.overspeedMode})"
-            else -> "길 안내 음성"
-        }
-
     /** 구간단속 구간 안이면 지금까지의 평균속도(km/h) */
     private fun sectionAverage(safety: KNSafety?) =
         (safety as? KNSafety_Section)?.sectionAvrSpeed?.takeIf { it > 0 }
@@ -328,6 +343,11 @@ class KakaoCameraSource(private val app: Application) : CameraSource, KNGuidance
 
     companion object {
         private const val TAG = "KakaoCameraSource"
+        /** GPS가 이만큼 계속 유효해야 위험 구간 안내를 냄 */
+        private const val GPS_SETTLE_MS = 10_000L
+        private const val GPS_MAX_ACCURACY_M = 30f
+        /** 같은 위험 구간 종류가 이 안에 또 나오면 거름 (방지턱 연속 등) */
+        private const val HAZARD_REPEAT_MS = 5_000L
         private const val RETRY_MIN_MS = 10_000L
         private const val RETRY_MAX_MS = 60_000L
         private var installed = false
