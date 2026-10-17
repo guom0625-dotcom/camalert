@@ -49,8 +49,10 @@ class NavWatcher : NotificationListenerService() {
     private fun StatusBarNotification.describe() =
         "채널=${notification.channelId} 분류=${notification.category ?: "-"}"
 
+    /** 길안내 고정 알림인지. 같은 앱의 음악 재생 알림(분류=transport)은 제외 */
     private fun StatusBarNotification.isPersistent() =
-        isOngoing || notification.flags and Notification.FLAG_FOREGROUND_SERVICE != 0
+        notification.category != Notification.CATEGORY_TRANSPORT &&
+            (isOngoing || notification.flags and Notification.FLAG_FOREGROUND_SERVICE != 0)
 
     companion object {
         /** 감지 대상 내비 앱: 패키지 → 이름 */

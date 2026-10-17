@@ -37,6 +37,10 @@ class AlertService : Service(), LocationListener {
     private val muted get() = paused || navPaused
     private var lastLocationLog = 0L
     private val main = Handler(Looper.getMainLooper())
+    private val disconnectExit = Runnable {
+        DiagLog.log(this, "서비스 종료 (차량 연결 끊김)")
+        shutdown(sound = false)
+    }
     /** 내비 앱이 화면에 떠 있는지 주기적으로 확인 */
     private val screenPoll = object : Runnable {
         override fun run() {
@@ -58,8 +62,15 @@ class AlertService : Service(), LocationListener {
         when (intent?.action) {
             ACTION_EXIT -> {
                 val silent = intent?.getBooleanExtra(EXTRA_SILENT, false) == true
-                DiagLog.log(this, if (silent) "서비스 종료 (차량 연결 끊김)" else "서비스 종료 (사용자)")
-                shutdown(sound = !silent)
+                main.removeCallbacks(disconnectExit)
+                if (silent && running) {
+                    // 주차 직후 차량 Bluetooth가 몇 초 사이 끊겼다 붙었다 하므로 잠시 기다렸다 종료
+                    DiagLog.log(this, "차량 연결 끊김 · ${DISCONNECT_GRACE_MS / 1000}초 뒤 종료")
+                    main.postDelayed(disconnectExit, DISCONNECT_GRACE_MS)
+                } else {
+                    DiagLog.log(this, if (silent) "서비스 종료 (차량 연결 끊김)" else "서비스 종료 (사용자)")
+                    shutdown(sound = !silent)
+                }
             }
             ACTION_PAUSE -> if (running) {
                 DiagLog.log(this, "멈춤")
@@ -71,6 +82,10 @@ class AlertService : Service(), LocationListener {
                 stopSelf()
             }
             else -> {
+                if (intent?.action == ACTION_START && main.hasCallbacks(disconnectExit)) {
+                    main.removeCallbacks(disconnectExit)
+                    DiagLog.log(this, "차량 다시 연결됨 · 계속 실행")
+                }
                 val wasMuted = running && muted
                 if (!running) {
                     if (!begin()) return START_NOT_STICKY
@@ -98,6 +113,7 @@ class AlertService : Service(), LocationListener {
         statusLine = null
         NavWatcher.listener = null
         main.removeCallbacks(screenPoll)
+        main.removeCallbacks(disconnectExit)
         if (running) stopTracking()
         super.onDestroy()
     }
@@ -220,6 +236,7 @@ class AlertService : Service(), LocationListener {
         private const val CHANNEL_RUNNING = "running"
         private const val CHANNEL_CONNECTED = "connected"
         private const val SCREEN_POLL_MS = 3_000L
+        private const val DISCONNECT_GRACE_MS = 30_000L
 
         /** 설정 화면에 보여줄 현재 상태. 서비스가 꺼져 있으면 null */
         @Volatile
