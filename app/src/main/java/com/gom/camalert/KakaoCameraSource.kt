@@ -133,6 +133,7 @@ class KakaoCameraSource(private val app: Application) : CameraSource, KNGuidance
         guidance = null
         KNSDK.sharedGpsManager()?.stopUpdate(this)
         audio.abandonAudioFocusRequest(focus)
+        release()
     }
 
     override fun onLocation(location: Location) {
@@ -198,8 +199,19 @@ class KakaoCameraSource(private val app: Application) : CameraSource, KNGuidance
             KNLanguageType.KNLanguageType_KOREAN,
         ) { error ->
             // 초기화 도중 서비스가 다시 만들어졌으면 결과는 새 객체가 받아야 함
-            main.post { current?.onInitialized(error) }
+            // 그 사이 종료됐으면 초기화하면서 켜진 GPS를 다시 끔
+            main.post { current?.onInitialized(error) ?: release() }
         }
+    }
+
+    /**
+     * SDK를 통째로 해제한다. SDK의 GPS 관리자는 받는 쪽(stopUpdate)이 없어져도 위치 수신을 끄지 않아서
+     * 해제하지 않으면 종료 후에도 GPS가 계속 켜져 있음. 다음 시작 때 다시 인증함
+     */
+    private fun release() {
+        if (KNSDK.initSt == KNSDKInitState.KNSDKInitState_NotInitialized) return
+        KNSDK.KNSDKRelease()
+        DiagLog.log(app, "카카오 SDK 해제 (GPS 끔)")
     }
 
     private fun onInitialized(error: KNError?) {
